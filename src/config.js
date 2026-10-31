@@ -128,7 +128,7 @@ module.exports = {
     START_BB: 20,
     BLIND_GROWTH: 1.5, // 레벨마다 블라인드 1.5배
     HANDS_PER_LEVEL: 6,
-    MAX_HANDS: 80, // 초과 시 칩 순위로 종료
+    MAX_HANDS: 40, // 초과 시 칩 순위로 종료
     MAX_SEATS: 8,
     MAX_BOTS: 6,
     LOBBY_MS: 180_000,

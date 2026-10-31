@@ -28,7 +28,7 @@ try {
 }
 
 const W = 1000;
-const H = 600;
+const H = 640;
 const R = (px) => `${px}px PretendardR`;
 const B = (px) => `${px}px PretendardB`;
 
@@ -206,7 +206,7 @@ function frame(ctx, id, pal) {
     // 아래쪽 불꽃
     ctx.fillStyle = g;
     for (let fx = 40; fx < W - 30; fx += 46) {
-      const fh = 18 + ((fx * 7) % 17);
+      const fh = 12 + ((fx * 7) % 13); // 패널(아래 끝 y 596)에 닿지 않는 높이
       ctx.beginPath();
       ctx.moveTo(fx - 12, H - inset);
       ctx.quadraticCurveTo(fx - 8, H - inset - fh * 0.6, fx, H - inset - fh);
@@ -293,7 +293,7 @@ function avatar(ctx, img, name, cx, cy, r, pal, frameId) {
     ctx.fillText([...(name || '?')][0], cx, cy + 4);
   }
   ctx.restore();
-  if (frameId === 'crown') crown(ctx, cx, cy - r - 14, 64, '#ffcf40');
+  if (frameId === 'crown') crown(ctx, cx, cy - r - 6, 54, '#ffcf40'); // 아바타 테두리에 얹힌 왕관 (카드 외곽선과 겹치지 않게)
 }
 
 /** 카드 한 장 (테마 색·표기 반영) */
@@ -368,25 +368,89 @@ function die(ctx, n, skin, x, y, s) {
   ctx.restore();
 }
 
-function statTile(ctx, x, y, w, label, value, pal) {
-  panel(ctx, x, y, w, 76);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = R(15);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(label, x + 14, y + 12);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(fitText(ctx, value, w - 28, B, 26), x + 14, y + 36);
-  ctx.fillStyle = pal.accent;
-  ctx.fillRect(x, y + 14, 3, 48);
-}
-
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 const signed = (n) => (n > 0 ? `+${fmt(n)}` : n < 0 ? `-${fmt(-n)}` : '±0');
+const MUTED = 'rgba(255,255,255,0.62)';
+const DIM = 'rgba(255,255,255,0.42)';
+
+function text(ctx, str, x, y, { font = R(16), color = '#ffffff', align = 'left', maxW = null, fitFont = null, size = null, min = 11 } = {}) {
+  ctx.textAlign = align;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = color;
+  let t = str;
+  if (maxW && fitFont) t = fitText(ctx, str, maxW, fitFont, size, min);
+  else ctx.font = font;
+  ctx.fillText(t, x, y);
+  return ctx.measureText(t).width;
+}
+
+function gradientFill(ctx, x, y, w, h, [a, b]) {
+  const g = ctx.createLinearGradient(x, y, x + w, y + h);
+  g.addColorStop(0, a);
+  g.addColorStop(1, b);
+  return g;
+}
+
+/** 업적 등급 배지 (칭호·대표 업적). 영웅 이상은 별·왕관 장식과 빛 */
+function tierPill(ctx, label, tier, x, y, h, { font = B(14), maxW = 220, accent = null } = {}) {
+  ctx.font = font;
+  const deco = tier ? tier.rank : -1;
+  const iconW = deco >= 2 ? 18 : 0;
+  let t = label;
+  while (t.length > 1 && ctx.measureText(t).width + iconW * (deco >= 3 ? 2 : 1) + 28 > maxW) t = t.slice(0, -1);
+  if (t !== label) t = `${t.slice(0, -1)}…`;
+  const tw = ctx.measureText(t).width;
+  const w = tw + 28 + (deco >= 2 ? iconW : 0) + (deco >= 3 ? iconW + 4 : 0);
+  ctx.save();
+  if (deco >= 3) {
+    ctx.shadowColor = tier.color[0];
+    ctx.shadowBlur = 14;
+  }
+  ctx.fillStyle = tier ? gradientFill(ctx, x, y, w, h, tier.color) : accent;
+  roundRect(ctx, x, y, w, h, h / 2);
+  ctx.fill();
+  ctx.restore();
+  if (deco >= 3) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x + 1, y + 1, w - 2, h - 2, h / 2 - 1);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const fg = tier ? tier.text : '#0b0f17';
+  let cx = x + 14;
+  if (deco >= 4) crown(ctx, cx + 7, y + h / 2 + 1, 15, fg);
+  else if (deco >= 2) star(ctx, cx + 7, y + h / 2, 7, fg);
+  if (deco >= 2) cx += iconW;
+  ctx.font = font;
+  ctx.fillStyle = fg;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(t, cx, y + h / 2 + 1);
+  if (deco >= 3) star(ctx, cx + tw + 13, y + h / 2, 7, fg);
+  return w;
+}
+
+function statTile(ctx, x, y, w, h, label, value, pal) {
+  panel(ctx, x, y, w, h);
+  ctx.fillStyle = pal.accent;
+  roundRect(ctx, x, y + 16, 4, h - 32, 2);
+  ctx.fill();
+  text(ctx, label, x + 18, y + 28, { font: R(14), color: MUTED });
+  text(ctx, value, x + 18, y + h - 18, { maxW: w - 34, fitFont: B, size: 26, min: 14 });
+}
 
 /**
- * @param d { name, avatarURL, equipped, money, rewardPoints, totals, winStreak, maxWinStreak, biggestWin, achievementCount, games: [{_id, rounds, wins, net}], rank? }
+ * @param d { name, avatarURL, equipped, money, rewardPoints, totals, winStreak, maxWinStreak, biggestWin,
+ *            achievements: [{id}], games: [{_id, rounds, wins, net}], rank? }
  * @returns PNG Buffer
+ *
+ * 레이아웃 (1000×640, 콘텐츠 영역 x 40~960):
+ *   머리 y 40~200  | 아바타 · 칭호/이름/대표 업적 · 잔고 패널
+ *   스탯 y 216~296 | 4칸 (승률 · 최대 연승 · 최대 순이익 · 누적 베팅)
+ *   업적 y 312~372 | 진행 바 + 등급별 개수
+ *   하단 y 388~596 | 게임별 전적 · 장착 꾸미기
  */
 async function render(d) {
   if (!canvasLib) throw new Error('canvas unavailable');
@@ -394,130 +458,178 @@ async function render(d) {
   const pal = palette(eq.color);
   const canvas = canvasLib.createCanvas(W, H);
   const ctx = canvas.getContext('2d');
+  const L = 40;
+  const RT = 960;
+  const total = d.totals || {};
+  const owned = d.achievements || [];
 
   background(ctx, pal);
   frame(ctx, eq.frame, pal);
 
-  // ── 머리: 아바타 · 이름 · 칭호
+  // ── 머리: 아바타
   const img = await loadAvatar(d.avatarURL);
-  avatar(ctx, img, d.name, 130, 140, 74, pal, eq.frame);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  let ty = 104;
+  avatar(ctx, img, d.name, 116, 122, 70, pal, eq.frame);
+
+  // ── 머리: 칭호 · 이름 · 대표 업적 (아바타 중심에 맞춰 세로 가운데 정렬)
+  const TX = 212;
+  const TW = 444;
+  const best = achievements.showcase(owned, 3);
+  const titleAch = eq.title ? achievements.byTitle[eq.title] : null;
+  const blocks = [eq.title ? 30 : 0, 44, best.length ? 28 : 0];
+  const gaps = blocks.filter(Boolean).length - 1;
+  let y = 122 - (blocks.reduce((a, b) => a + b, 0) + gaps * 12) / 2;
   if (eq.title) {
-    ctx.font = B(17);
-    const label = `「${eq.title}」`;
-    const tw = ctx.measureText(label).width + 26;
-    ctx.fillStyle = pal.accent;
-    roundRect(ctx, 236, ty - 26, tw, 34, 17);
-    ctx.fill();
-    ctx.fillStyle = '#0b0f17';
-    ctx.fillText(label, 249, ty - 3);
-    ty += 50;
-  } else ty += 30;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(fitText(ctx, d.name, 450, B, 46, 22), 236, ty);
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.font = R(18);
-  const total = d.totals || {};
+    tierPill(ctx, eq.title, titleAch ? achievements.tierOf(titleAch) : null, TX, y, 30, { font: B(15), maxW: TW, accent: pal.accent });
+    y += 30 + 12;
+  }
+  text(ctx, d.name, TX, y + 38, { maxW: TW, fitFont: B, size: 42, min: 20 });
+  y += 44 + 12;
+  if (best.length) {
+    let bx = TX;
+    for (const a of best) {
+      const room = TX + TW - bx;
+      if (room < 90) break;
+      bx += tierPill(ctx, a.name, achievements.tierOf(a), bx, y, 28, { font: B(13), maxW: Math.min(room, 200) }) + 8;
+    }
+  }
+
+  // ── 머리: 잔고 패널 (라벨 왼쪽 · 값 오른쪽 정렬)
+  const PX = 676;
+  const PW = RT - PX;
+  panel(ctx, PX, 48, PW, 148);
+  text(ctx, '잔고', PX + 20, 78, { font: R(14), color: MUTED });
+  text(ctx, fmt(d.money ?? 0), RT - 20, 118, { align: 'right', color: '#ffd54f', maxW: PW - 40, fitFont: B, size: 34, min: 16 });
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(PX + 20, 134, PW - 40, 1);
+  text(ctx, '보상 포인트', PX + 20, 158, { font: R(14), color: MUTED });
+  text(ctx, `${fmt(d.rewardPoints ?? 0)}P`, RT - 20, 158, { font: B(15), align: 'right' });
+  text(ctx, '서버 잔고 순위', PX + 20, 182, { font: R(14), color: MUTED });
+  text(ctx, d.rank ? `#${fmt(d.rank)}` : '-', RT - 20, 182, { font: B(15), align: 'right' });
+
+  // ── 스탯 4칸
   const winRate = total.games ? `${((total.wins / total.games) * 100).toFixed(1)}%` : '-';
-  ctx.fillText(`총 ${fmt(total.games ?? 0)}판 · ${fmt(total.wins ?? 0)}승 · 누적 베팅 ${fmt(total.wagered ?? 0)}`, 238, ty + 34);
-
-  // ── 우상단: 잔고 · 포인트
-  panel(ctx, 700, 46, 256, 132);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = R(15);
-  ctx.fillText('잔고', 936, 76);
-  ctx.fillStyle = '#ffd54f';
-  ctx.fillText(fitText(ctx, fmt(d.money ?? 0), 210, B, 34), 936, 114);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = R(15);
-  ctx.fillText(`보상 포인트 ${fmt(d.rewardPoints ?? 0)}P`, 936, 146);
-  if (d.rank) ctx.fillText(`서버 잔고 순위 #${d.rank}`, 936, 166);
-  ctx.textAlign = 'left';
-
-  // ── 스탯 타일
   const tiles = [
-    ['승률', winRate],
-    ['최대 연승', `${fmt(d.maxWinStreak ?? 0)}연승${d.winStreak ? ` (현재 ${d.winStreak})` : ''}`],
+    ['승률', total.games ? `${winRate}  (${fmt(total.wins ?? 0)}/${fmt(total.games)})` : '-'],
+    ['최대 연승', `${fmt(d.maxWinStreak ?? 0)}연승${d.winStreak ? `  · 현재 ${d.winStreak}` : ''}`],
     ['한 판 최대 순이익', fmt(d.biggestWin ?? 0)],
-    ['업적', `${d.achievementCount ?? 0} / ${achievements.ACHIEVEMENTS.length}`],
+    ['누적 베팅', fmt(total.wagered ?? 0)],
   ];
-  tiles.forEach(([label, value], k) => statTile(ctx, 44 + k * 230, 246, 216, label, value, pal));
-  // 업적 진행 바
-  const ratio = Math.min(1, (d.achievementCount ?? 0) / Math.max(1, achievements.ACHIEVEMENTS.length));
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';
-  roundRect(ctx, 44, 334, 906, 8, 4);
-  ctx.fill();
-  if (ratio > 0) {
-    ctx.fillStyle = pal.accent;
-    roundRect(ctx, 44, 334, Math.max(8, 906 * ratio), 8, 4);
-    ctx.fill();
-  }
+  const tw = (RT - L - 16 * 3) / 4;
+  tiles.forEach(([label, value], k) => statTile(ctx, L + k * (tw + 16), 216, tw, 80, label, value, pal));
 
-  // ── 좌하단: 게임별 전적
-  panel(ctx, 44, 362, 520, 194);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = B(18);
-  ctx.fillText('게임별 전적 (이 서버)', 64, 392);
-  const games = (d.games || []).slice(0, 4);
-  if (!games.length) {
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = R(16);
-    ctx.fillText('아직 기록이 없어요. 첫 게임을 시작해 보세요!', 64, 430);
-  }
-  games.forEach((g, k) => {
-    const y = 428 + k * 32;
-    const rate = g.rounds ? (g.wins / g.rounds) * 100 : 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.font = B(16);
-    ctx.fillText(registry.GAMES[g._id]?.label ?? g._id, 64, y);
-    ctx.font = R(15);
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillText(`${fmt(g.rounds)}판`, 170, y);
-    // 승률 바
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    roundRect(ctx, 240, y - 12, 150, 10, 5);
-    ctx.fill();
+  // ── 업적 띠: 진행 바 + 등급별 개수
+  panel(ctx, L, 312, RT - L, 60);
+  const have = owned.length;
+  const all = achievements.ACHIEVEMENTS.length;
+  text(ctx, '업적', L + 20, 338, { font: R(14), color: MUTED });
+  text(ctx, `${have} / ${all}`, L + 60, 338, { font: B(16) });
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  roundRect(ctx, L + 20, 350, 280, 8, 4);
+  ctx.fill();
+  if (have) {
     ctx.fillStyle = pal.accent;
-    roundRect(ctx, 240, y - 12, Math.max(6, 1.5 * rate), 10, 5);
+    roundRect(ctx, L + 20, 350, Math.max(8, (280 * have) / all), 8, 4);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText(`${rate.toFixed(0)}%`, 398, y);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = g.net > 0 ? '#69f0ae' : g.net < 0 ? '#ff8a80' : '#cfd8dc';
-    ctx.font = B(16);
-    ctx.fillText(signed(g.net), 544, y);
-    ctx.textAlign = 'left';
+  }
+  const counts = achievements.tierCounts(owned);
+  const chipX = L + 330;
+  const chipW = (RT - 20 - chipX) / achievements.TIER_ORDER.length;
+  achievements.TIER_ORDER.forEach((t, k) => {
+    const tier = achievements.TIERS[t];
+    const cx = chipX + k * chipW;
+    const c = counts[t];
+    ctx.save();
+    if (c.have && tier.rank >= 3) {
+      ctx.shadowColor = tier.color[0];
+      ctx.shadowBlur = 10;
+    }
+    ctx.fillStyle = gradientFill(ctx, cx, 334, 16, 16, tier.color);
+    ctx.beginPath();
+    ctx.arc(cx + 8, 342, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    if (!c.have) {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath();
+      ctx.arc(cx + 8, 342, 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const lw = text(ctx, tier.label, cx + 24, 348, { font: R(14), color: c.have ? MUTED : DIM });
+    text(ctx, `${c.have}/${c.total}`, cx + 24 + lw + 6, 348, { font: B(15), color: c.have ? '#ffffff' : DIM });
   });
 
-  // ── 우하단: 장착 꾸미기 (실제 모습으로)
-  panel(ctx, 580, 362, 376, 194);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = B(18);
-  ctx.fillText('장착 중', 600, 392);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = R(14);
+  // ── 좌하단: 게임별 전적 (열 고정: 게임 · 판수 · 승률 바 · 승률 · 손익)
+  const GX = L;
+  const GW = 500;
+  const GY = 388;
+  panel(ctx, GX, GY, GW, 208);
+  text(ctx, '게임별 전적', GX + 20, GY + 32, { font: B(17) });
+  text(ctx, '이 서버', GX + 120, GY + 32, { font: R(13), color: DIM });
+  const col = { name: GX + 20, rounds: GX + 182, bar: GX + 200, barW: 120, pct: GX + 372, net: GX + GW - 20 };
+  text(ctx, '게임', col.name, GY + 58, { font: R(12), color: DIM });
+  text(ctx, '판수', col.rounds, GY + 58, { font: R(12), color: DIM, align: 'right' });
+  text(ctx, '승률', col.bar, GY + 58, { font: R(12), color: DIM });
+  text(ctx, '손익', col.net, GY + 58, { font: R(12), color: DIM, align: 'right' });
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(GX + 20, GY + 66, GW - 40, 1);
+  const games = (d.games || []).slice(0, 4);
+  if (!games.length) text(ctx, '아직 기록이 없어요. 첫 게임을 시작해 보세요!', GX + 20, GY + 104, { font: R(15), color: MUTED });
+  games.forEach((g, k) => {
+    const ry = GY + 96 + k * 30;
+    const rate = g.rounds ? (g.wins / g.rounds) * 100 : 0;
+    text(ctx, registry.GAMES[g._id]?.label ?? g._id, col.name, ry, { maxW: 110, fitFont: B, size: 15, min: 11 });
+    text(ctx, fmt(g.rounds), col.rounds, ry, { font: R(14), color: MUTED, align: 'right' });
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    roundRect(ctx, col.bar, ry - 10, col.barW, 8, 4);
+    ctx.fill();
+    ctx.fillStyle = pal.accent;
+    roundRect(ctx, col.bar, ry - 10, Math.max(8, (col.barW * rate) / 100), 8, 4);
+    ctx.fill();
+    text(ctx, `${rate.toFixed(0)}%`, col.pct, ry, { font: R(14), color: MUTED, align: 'right' });
+    text(ctx, signed(g.net), col.net, ry, { align: 'right', color: g.net > 0 ? '#69f0ae' : g.net < 0 ? '#ff8a80' : '#cfd8dc', maxW: 100, fitFont: B, size: 15, min: 11 });
+  });
+
+  // ── 우하단: 장착 꾸미기 (실제 모습)
+  const EX = GX + GW + 16;
+  const EW = RT - EX;
+  panel(ctx, EX, GY, EW, 208);
+  text(ctx, '장착 중', EX + 20, GY + 32, { font: B(17) });
   const nameOf = (type) => cosmetics.CATALOG[type][eq[type]]?.name ?? eq[type];
-  ctx.fillText(`카드 · ${nameOf('cardTheme')}`, 600, 418);
   const sample = [{ rank: 'A', suit: '♠' }, { rank: 'K', suit: '♥' }, { rank: 'Q', suit: '♦' }, { rank: 'J', suit: '♣' }];
-  sample.forEach((c, k) => playingCard(ctx, c, eq.cardTheme, 600 + k * 62, 430, 54, 78));
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fillText(`주사위 · ${nameOf('diceSkin')}`, 852, 418);
-  die(ctx, 6, eq.diceSkin, 852, 430, 38);
-  die(ctx, 3, eq.diceSkin, 896, 430, 38);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = R(14);
-  ctx.fillText(`슬롯 · ${nameOf('slotTheme')}`, 852, 486);
-  ctx.fillText(`테두리 · ${nameOf('frame')}`, 852, 506);
-  ctx.fillText('색상 · ', 600, 536);
-  const cw = ctx.measureText('색상 · ').width;
-  ctx.fillStyle = pal.accent;
-  roundRect(ctx, 600 + cw, 523, 16, 16, 4);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fillText(nameOf('color'), 600 + cw + 22, 536);
+  const cardW = 50;
+  const cardH = 72;
+  sample.forEach((c, k) => playingCard(ctx, c, eq.cardTheme, EX + 20 + k * (cardW + 8), GY + 48, cardW, cardH));
+  const dX = EX + 20 + 4 * (cardW + 8) + 16;
+  const dS = 40;
+  die(ctx, 6, eq.diceSkin, dX, GY + 64, dS);
+  die(ctx, 3, eq.diceSkin, dX + dS + 8, GY + 64, dS);
+  text(ctx, '카드 테마', EX + 20, GY + 140, { font: R(12), color: DIM });
+  text(ctx, nameOf('cardTheme'), EX + 20, GY + 158, { maxW: dX - EX - 36, fitFont: B, size: 14, min: 11 });
+  text(ctx, '주사위', dX, GY + 140, { font: R(12), color: DIM });
+  text(ctx, nameOf('diceSkin'), dX, GY + 158, { maxW: RT - 20 - dX, fitFont: B, size: 14, min: 11 });
+  // 하단 3칸: 색상 · 테두리 · 슬롯
+  const pills = [
+    ['색상', nameOf('color'), true],
+    ['테두리', nameOf('frame'), false],
+    ['슬롯', nameOf('slotTheme'), false],
+  ];
+  const pw = (EW - 40 - 16) / 3;
+  pills.forEach(([label, value, swatch], k) => {
+    const px = EX + 20 + k * (pw + 8);
+    const py = GY + 170;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    roundRect(ctx, px, py, pw, 26, 8);
+    ctx.fill();
+    let tx = px + 10;
+    if (swatch) {
+      ctx.fillStyle = pal.accent;
+      roundRect(ctx, tx, py + 7, 12, 12, 3);
+      ctx.fill();
+      tx += 18;
+    }
+    const lw = text(ctx, label, tx, py + 18, { font: R(12), color: DIM });
+    text(ctx, value, tx + lw + 6, py + 18, { maxW: px + pw - 8 - (tx + lw + 6), fitFont: B, size: 13, min: 10 });
+  });
 
   return canvas.encode('png');
 }

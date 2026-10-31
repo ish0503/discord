@@ -41,11 +41,11 @@ function render(l, note = '', { closed = false } = {}) {
 const seats = (l) => l.humans.length + l.spec.bots;
 
 /**
- * @param spec { prefix, game, title, info(l)→string[], maxHumans, bots, minSeats, lobbyMs, entryCheck(userId, guildId)→사유|null, onStart(l) }
+ * @param spec { prefix, game, sessionScope?, busyText?, title, info(l)→string[], maxHumans, bots, minSeats, lobbyMs, entryCheck(userId, guildId)→사유|null, onStart(l) }
  */
 async function open(i, spec) {
-  const marker = sessions.start(i.user.id, spec.game, {}, { persistent: true });
-  if (!marker) return i.reply(ephemeral(busyText));
+  const marker = sessions.start(i.user.id, spec.game, {}, { persistent: true, scope: spec.sessionScope });
+  if (!marker) return i.reply(ephemeral(spec.busyText ?? busyText));
   await i.deferReply();
   const reason = await spec.entryCheck(i.user.id, i.guildId).catch((e) => e.message);
   if (reason) {
@@ -99,8 +99,8 @@ async function handleButton(i, action, lobbyId) {
   if (action === 'join') {
     if (l.humans.some((h) => h.id === uid)) return i.reply(ephemeral('이미 참가했어요.'));
     if (l.humans.length >= l.spec.maxHumans) return i.reply(ephemeral('자리가 꽉 찼어요.'));
-    const marker = sessions.start(uid, l.spec.game, {}, { persistent: true });
-    if (!marker) return i.reply(ephemeral(busyText));
+    const marker = sessions.start(uid, l.spec.game, {}, { persistent: true, scope: l.spec.sessionScope });
+    if (!marker) return i.reply(ephemeral(l.spec.busyText ?? busyText));
     await i.deferReply({ flags: MessageFlags.Ephemeral });
     const reason = await l.spec.entryCheck(uid, l.guildId).catch((e) => e.message);
     if (reason || l.state !== 'lobby' || l.humans.length >= l.spec.maxHumans) {

@@ -52,7 +52,7 @@ function mk(uid,opts={},extra={}){ const i={ id:String(nid++), user:{id:uid,user
   async reply(p){ this.replied=true; if(p.flags||p.ephemeral) eph.push(`[${uid}] ${desc(p)}`); else pub=p; }, async deferReply(o){ this.deferred=true; this._eph=!!(o?.flags||o?.ephemeral); },
   async editReply(p){ if(this._eph) eph.push(`[${uid}] ${desc(p)}`); else pub=p; }, async followUp(p){ eph.push(`[${uid}] ${desc(p)}`); return {id:'f'+nid}; },
   async deferUpdate(){ this.deferred=true; }, async update(p){ pub=p; }, async fetchReply(){ return fakeMessage('m'+this.id, extra.chan||'C'); },
-  webhook:{ async editMessage(m,p){ eph.push(`[${uid} private] ${desc(p)}`); } }, isButton:()=>true }; return i; }
+  webhook:{ async editMessage(m,p){ eph.push(`[${uid} private] ${desc(p)}`); }, async deleteMessage(){ eph.push(`[${uid} deleted]`); } }, async deleteReply(){ eph.push(`[${uid} deleted]`); }, isButton:()=>true }; return i; }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const ids=()=>(pub?.components||[]).flatMap(r=>r.calls.find(c=>c[0]==='addComponents')[1].flat()).map(b=>(b.calls.find(x=>x[0]==='setCustomId')||[])[1]?.[0]).filter(Boolean);
 const ok=(c,m)=>{ lastProgress=Date.now(); console.log(c?'✅':'❌',m); if(!c) process.exitCode=1; };
@@ -135,10 +135,25 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   ok(desc(pub).includes('<@A> → <@Q>'), '송금 결과 공개');
   await cmds['송금'].execute(mk('A',{'유저':{id:'Q'},'금액':195000})); ok(eph.at(-1).includes('한도'), '하루 송금 한도');
   await cmds['도움말'].execute(mk('A')); ok(eph.at(-1)!==undefined, '도움말');
+  await cmds['도움말'].execute(mk('A',{'분류':'howto'})); ok(['21을 넘지','9에 가까운','잭팟','캐시아웃','Lo(2~6)','홀덤','블라인드'].every(g=>eph.at(-1).includes(g)), '도움말 게임 방법 (7개 게임)');
 
   step('토너먼트 (사람 1 + 봇 3, 6핸드 제한)');
   const before=money('E') ?? 10000;
-  await cmds['토너먼트'].execute(mk('E',{'참가비':3000,'봇':3,'최대인원':1})); await sleep(2500);
+  // 토너먼트 진행 중에도 채널에서 다른 게임 가능 (세션 슬롯 분리)
+  const tPromise=cmds['토너먼트'].execute(mk('E',{'참가비':3000,'봇':3,'최대인원':1}));
+  await sleep(5);
+  await cmds['주사위'].execute(mk('E',{'금액':500})); ok(!eph.some(e=>e.includes('이미 진행 중')), '토너먼트 중 채널에서 다른 게임 시작 가능');
+  await btn('주사위','E','dc:E:stop:');
+  await tPromise;
+  const introBtn=(threadLog[0]?.payload.components||[]).flatMap(r=>r.calls.find(c=>c[0]==='addComponents')[1].flat()).map(b=>(b.calls.find(x=>x[0]==='setCustomId')||[])[1]?.[0]).find(x=>x?.includes(':hand:'));
+  ok(!!introBtn, '스레드 시작 안내에 [내 패] 버튼');
+  const ephBefore=eph.length;
+  await btn('토너먼트','E',introBtn,{},{chan:'TmC'});
+  ok(eph.slice(ephBefore).some(e=>e.startsWith('[E]')&&e.includes('내 패')), '[내 패] → 스레드에 비공개 패 표시');
+  await sleep(2500);
+  const followUps=eph.slice(ephBefore).filter(e=>e.startsWith('[E]')&&e.includes('🃏 **내 패**')).length;
+  ok(followUps>=2, `이후 핸드마다 내 패 자동 표시 (${followUps}회)`);
+  ok(eph.slice(ephBefore).some(e=>e==='[E deleted]'), '지난 핸드 비공개 메시지는 정리');
   const tl=M.GameLog.docs.find(l=>l.game==='tournament'&&l.userId==='E');
   ok(tl && tl.staked===3000, `참가비 3,000 정산 (지급 ${tl?.payout}, 순위 ${tl?.detail?.place})`);
   ok(tl?.payout===3000, '사람 1명이면 상금 풀 전액 = 참가비 (봇은 상금 없음)');
@@ -167,7 +182,8 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   ok(M.Profile.docs.find(p=>p.userId==='A').equipped.cardTheme==='outline', '카드 테마 장착');
   await cmds['인벤토리'].handleSelect(mk('A',{}, {values:['cardTheme|letters']}), {action:'equip'}); ok(eph.at(-1).includes('보유하지 않은'), '미보유 아이템 장착 차단');
   await cmds['프로필'].execute(mk('A')); ok(pub.files?.[0]?.name==='profile.png' && pub.files[0].data.length>10000, `프로필 이미지 카드 (${pub.files?.[0]?.data.length} bytes)`);
-  await cmds['업적'].execute(mk('A')); ok(desc(pub).includes('업적') || true, '업적 목록');
+  await cmds['업적'].execute(mk('A')); ok(['신화','전설','영웅','희귀','일반'].every(t=>desc(pub).includes(t)), '업적 등급별 분류');
+  await cmds['업적'].execute(mk('A',{'등급':'mythic'})); ok(desc(pub).includes('신화 등급') && desc(pub).includes('???'), '신화 등급 상세 (숨겨진 업적 ???)');
   await cmds['전적'].execute(mk('A')); ok(desc(pub).includes('슬롯'), '전적 목록');
   await cmds['리플레이'].execute(mk('C')); ok(desc(pub).includes('리플레이') || desc(pub).includes('판 ID') || pub.embeds, '리플레이');
   await cmds['분석'].execute(mk('A')); ok(eph.at(-1).includes('분석') || eph.at(-1).length>0, '분석');

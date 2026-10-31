@@ -20,6 +20,8 @@ const KIND_LABEL = {
 const ACTION_TEXT = { fold: '🏳️ 다이', check: '✋ 체크', call: '📞 콜', 'allin-call': '🔥 올인 콜', bet: '💰 베팅', raise: '⬆️ 레이즈', allin: '🔥 올인' };
 
 const rooms = new Map();
+/** 인터랙션 토큰은 15분 유효 → 여유를 두고 13분까지만 비공개 메시지 발송·편집에 사용 */
+const TOKEN_FRESH_MS = 13 * 60_000;
 
 function makeBots(n, names, stack) {
   const keys = Object.keys(poker.BOT_STYLES);
@@ -36,7 +38,10 @@ class PokerRoom {
   /**
    * @param o { id, prefix, guildId, channelId, title(room)→string, seats, live, ui, message,
    *            turnMs, thinkMs, simulations, streetPauseMs, revealFoldedBots, autoSitOut, footer(room)→string, onHandEnd,
-   *            onInteraction(i) — 공개 메시지에 deferUpdate된 버튼 인터랙션 (화면 편집 토큰 갱신용) }
+   *            onInteraction(i) — 공개 메시지에 deferUpdate된 버튼 인터랙션 (화면 편집 토큰 갱신용),
+   *            privateFollowUps — true면 (스레드 진행용) 핸드마다 각 참가자에게 "내 패" 비공개 메시지를
+   *                               테이블과 같은 곳(스레드)에 새로 띄우고, 지난 핸드의 것은 지움.
+   *                               참가자가 스레드에서 누른 가장 최근 버튼의 토큰(13분 이내)을 사용한다. }
    */
   constructor(o) {
     Object.assign(this, o);
@@ -69,6 +74,7 @@ class PokerRoom {
     );
     this.hand.start(shuffle(createDecks(1)));
     this.log = [{ text: `🂠 핸드 #${this.handNo} · 블라인드 ${num(sb)}/${num(bb)}${ante ? ` · 앤티 ${num(ante)}` : ''}` }];
+    if (this.privateFollowUps) await this.postPrivates();
     this.updatePrivates();
     await this.drive();
   }
@@ -103,6 +109,7 @@ class PokerRoom {
     }
     if (h.finished && this.state === 'playing') {
       clearTimeout(this.timers.turn);
+      this.updatePrivates(); // 비공개 메시지에 핸드 결과 반영
       await this.onHandEnd(this, h);
     }
   }
@@ -153,20 +160,40 @@ class PokerRoom {
     const uid = i.user.id;
     const mineIdx = this.handSeats?.findIndex((s) => s.type === 'human' && s.id === uid) ?? -1;
     if (action === 'hand') {
-      if (mineIdx < 0) return i.reply(ephemeral('이번 핸드 참가자가 아니에요.'));
-      return i.reply({ ...this.privateText(mineIdx), flags: MessageFlags.Ephemeral });
+      if (mineIdx < 0) {
+        const out = this.seats.some((s) => s.id === uid && s.stack <= 0);
+        return i.reply(ephemeral(out ? '💀 탈락해서 더 이상 받는 패가 없어요. 관전은 계속할 수 있어요!' : '이번 핸드 참가자가 아니에요.'));
+      }
+      await i.reply({ ...this.privateText(mineIdx), flags: MessageFlags.Ephemeral });
+      this.adoptPrivate(this.handSeats[mineIdx], i, { msg: null });
+      return undefined;
     }
     if (action === 'back') {
       const seat = this.seats.find((s) => s.id === uid);
       if (!seat) return i.reply(ephemeral('참가자가 아니에요.'));
       seat.sittingOut = false;
       seat.timeouts = 0;
+      const k = this.handSeats?.indexOf(seat) ?? -1;
+      if (k >= 0 && this.hand && !this.hand.seats[k].folded) {
+        const p = this.privateText(k);
+        await i.reply({ content: `🔙 복귀했어요. 다음 차례부터 직접 행동합니다.\n\n${p.content}`, flags: MessageFlags.Ephemeral });
+        this.adoptPrivate(seat, i, { msg: null });
+        return undefined;
+      }
       return i.reply(ephemeral('🔙 복귀했어요. 다음 차례부터 직접 행동합니다.'));
     }
     if (!h || h.finished || this.state !== 'playing') return i.reply(ephemeral('진행 중인 핸드가 없어요.'));
     const idx = h.actor;
     const seat = this.handSeats[idx];
-    if (seat.id !== uid) return i.reply(ephemeral(mineIdx >= 0 ? `지금은 **${seat.name}** 님 차례예요.` : '이 테이블 참가자가 아니에요.'));
+    if (seat.id !== uid) {
+      await i.reply(ephemeral(mineIdx >= 0 ? `지금은 **${seat.name}** 님 차례예요.` : '이 테이블 참가자가 아니에요.'));
+      if (mineIdx >= 0) {
+        const mine = this.handSeats[mineIdx];
+        mine.lastIx = { i, at: Date.now() }; // 비공개 메시지용 토큰
+        if (this.privateFollowUps && mine.priv?.handNo !== this.handNo) this.postPrivate(mine, mineIdx).catch(() => {});
+      }
+      return undefined;
+    }
     const [handNo, toRaw] = String(extra).split('.');
     if (Number(handNo) !== this.handNo) return i.reply(ephemeral('지난 핸드의 버튼이에요.'));
     if (this.busy) return i.deferUpdate();
@@ -176,6 +203,11 @@ class PokerRoom {
     this.ui = i;
     this.onInteraction?.(i);
     seat.timeouts = 0;
+    seat.lastIx = { i, at: Date.now() };
+    // 이번 핸드 비공개 메시지가 없거나 토큰이 오래됐으면 새 토큰으로 다시 띄움
+    if (this.privateFollowUps && (seat.priv?.handNo !== this.handNo || Date.now() - seat.priv.at > TOKEN_FRESH_MS - 3 * 60_000)) {
+      this.postPrivate(seat, this.handSeats.indexOf(seat)).catch(() => {});
+    }
     await runExclusive(this, async () => {
       if (this.hand !== h || h.actor !== idx) return;
       clearTimeout(this.timers.turn);
@@ -199,9 +231,47 @@ class PokerRoom {
     return { content: txt };
   }
 
+  /**
+   * 응답이 끝난 인터랙션(i)의 비공개 메시지를 이 좌석의 "내 패" 메시지로 삼는다.
+   * msg = null이면 i의 원래 응답, 아니면 i로 보낸 followUp 메시지. 이전 메시지는 지워서 하나만 남김.
+   */
+  adoptPrivate(seat, i, { msg }) {
+    const old = seat.priv;
+    const at = Date.now();
+    seat.lastIx = { i, at };
+    seat.priv = {
+      handNo: this.handNo,
+      at,
+      edit: (p) => (msg ? i.webhook.editMessage(msg, p) : i.editReply(p)),
+      del: () => (msg ? i.webhook.deleteMessage(msg) : i.deleteReply()),
+    };
+    seat.privateEdit = seat.priv.edit;
+    if (old?.del) Promise.resolve().then(old.del).catch(() => {});
+  }
+
+  /** 가장 최근 버튼 토큰으로 이 좌석에게 새 "내 패" 비공개 메시지를 보냄 (토큰이 오래됐으면 false) */
+  async postPrivate(seat, idx) {
+    const ix = seat.lastIx;
+    if (idx < 0 || !ix || Date.now() - ix.at > TOKEN_FRESH_MS) return false;
+    const msg = await ix.i.followUp({ ...this.privateText(idx), flags: MessageFlags.Ephemeral });
+    // adoptPrivate가 lastIx.at을 지금으로 바꾸지 않도록 원래 토큰 시각 유지
+    this.adoptPrivate(seat, ix.i, { msg });
+    seat.priv.at = ix.at;
+    seat.lastIx = ix;
+    return true;
+  }
+
+  /** 새 핸드 시작: 살아 있는 사람마다 내 패 메시지를 새로 띄움 (토큰 없는 사람은 [내 패] 버튼 안내가 테이블에 있음) */
+  async postPrivates() {
+    await Promise.all(
+      this.handSeats.map((seat, idx) => (seat.type === 'human' ? this.postPrivate(seat, idx).catch(() => false) : false)),
+    );
+  }
+
   updatePrivates() {
     this.handSeats.forEach((seat, idx) => {
       if (seat.type !== 'human' || !seat.privateEdit) return;
+      if (seat.priv && Date.now() - seat.priv.at > TOKEN_FRESH_MS) return; // 만료된 토큰
       Promise.resolve()
         .then(() => seat.privateEdit(this.privateText(idx)))
         .catch(() => {});

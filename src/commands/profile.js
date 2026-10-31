@@ -59,9 +59,9 @@ module.exports = {
     const eq = { ...cosmetics.DEFAULTS, ...p.equipped };
     const member = user.id === i.user.id ? i.member : null;
     const name = member?.displayName ?? user.globalName ?? user.displayName ?? user.username;
-    const recent = (p.achievements || []).slice(-3).reverse().map((a) => achievements.byId[a.id]).filter(Boolean);
+    const best = achievements.showcase(p.achievements, 3);
     const extra = [
-      recent.length ? `🏆 최근 업적: ${recent.map((a) => `${achievements.RARITY[a.rarity]} ${a.name}`).join(' · ')}` : '',
+      best.length ? `🏅 대표 업적: ${best.map((a) => `${achievements.RARITY[a.rarity]} **${achievements.display(a)}**`).join(' · ')}` : '',
       active.length ? `🎉 진행 중 이벤트: ${active.map((e) => `${e.name} (포인트 ×${e.multiplier})`).join(', ')}` : '',
     ].filter(Boolean);
 
@@ -78,6 +78,7 @@ module.exports = {
           maxWinStreak: p.maxWinStreak,
           biggestWin: acc.stats?.biggestWin ?? 0,
           achievementCount: p.achievements?.length ?? 0,
+          achievements: p.achievements || [],
           games: summary,
           rank: await balanceRank(i.guildId, acc.money),
         });

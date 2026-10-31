@@ -57,8 +57,18 @@ async function unlock(userId, guildId, list, channelId) {
     if (res.modifiedCount === 1) got.push({ ...a, points });
   }
   if (got.length && channelId) {
-    const lines = got.map((a) => `${achievements.RARITY[a.rarity]} **${a.name}** — 칭호 「${a.title}」 + ${points(a.points)}`);
-    notifier.send(channelId, `🏆 <@${userId}> 업적 달성!\n${lines.join('\n')}`);
+    const top = got.reduce((m, a) => (achievements.tierOf(a).rank > achievements.tierOf(m).rank ? a : m), got[0]);
+    const tier = achievements.tierOf(top);
+    const lines = got.map((a) => `${achievements.RARITY[a.rarity]} **${achievements.display(a)}** (${achievements.tierOf(a).label}) — 칭호 「${a.title}」 + ${points(a.points)}`);
+    if (tier.rank >= 2) {
+      // 영웅 이상: 등급 색 임베드로 크게 알림
+      const head = tier.rank >= 4 ? '🔴✨ 신화 업적 달성! ✨🔴' : tier.rank >= 3 ? '🟡✨ 전설 업적 달성! ✨🟡' : '🟣 영웅 업적 달성!';
+      notifier.send(channelId, {
+        content: `<@${userId}>`,
+        embeds: [{ color: parseInt(tier.color[0].slice(1), 16), title: head, description: lines.join('\n') }],
+        allowedMentions: { parse: [] },
+      });
+    } else notifier.send(channelId, `🏆 <@${userId}> 업적 달성!\n${lines.join('\n')}`);
   }
   return got;
 }

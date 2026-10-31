@@ -377,6 +377,25 @@ test('업적: 조건 판정과 중복 방지', () => {
   assert.equal(again.length, 0, '이미 받은 업적은 다시 안 줌');
 });
 
+test('업적: 등급·장식·대표 업적·무결성', () => {
+  const A = achievements.ACHIEVEMENTS;
+  assert.ok(A.length >= 40, `업적 ${A.length}개`);
+  assert.equal(new Set(A.map((a) => a.id)).size, A.length, 'id 중복 없음');
+  assert.equal(new Set(A.map((a) => a.title)).size, A.length, '칭호 중복 없음');
+  for (const a of A) assert.ok(achievements.TIERS[a.rarity], `${a.id} 등급`);
+  for (const t of achievements.TIER_ORDER) assert.ok(A.some((a) => a.rarity === t), `${t} 등급 업적 존재`);
+  // 영웅 이상은 특수기호 장식, 희귀 이하는 그대로
+  assert.equal(achievements.display(achievements.byId.first_win), '첫 승리');
+  assert.equal(achievements.display(achievements.byId.poker_royal), '⟪♛ 로열 로드 ♛⟫');
+  assert.equal(achievements.display(achievements.byId.slot_jackpot), '『✦ 슬롯의 전설 ✦』');
+  assert.equal(achievements.display(achievements.byId.tourney_win), '✧ 챔피언 ✧');
+  const best = achievements.showcase([{ id: 'first_win' }, { id: 'slot_jackpot' }, { id: 'crash_10x' }, { id: 'poker_royal' }], 3).map((a) => a.id);
+  assert.deepEqual(best, ['poker_royal', 'slot_jackpot', 'crash_10x'], '대표 업적은 등급 높은 순');
+  const ev = { game: 'tournament', staked: 1000, payout: 4000, net: 3000, detail: { place: 1, humans: 4 } };
+  const got = achievements.evaluate({ ev, profile: { totals: { games: 1, wins: 1, wagered: 1000 }, maxWinStreak: 1, rewardPoints: 0, achievements: [] } }, []).map((a) => a.id);
+  for (const id of ['tourney_play', 'tourney_win', 'tourney_crown', 'tourney_itm']) assert.ok(got.includes(id), id);
+});
+
 test('꾸미기: 테마 렌더링과 상점 카탈로그 무결성', () => {
   assert.equal(cosmetics.card({ rank: 'K', suit: '♥' }, 'outline'), '🤴♥️');
   assert.equal(cosmetics.card({ rank: '10', suit: '♦' }, 'letters'), 'Td');
