@@ -15,7 +15,6 @@
   "dependencies": {
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "mongodb": "^5.9.0",
     "mongoose": "^8.8.0"
   },
   "license": "MIT"
