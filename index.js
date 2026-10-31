@@ -45,11 +45,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isButton()) {
-      // customId 규칙: prefix:ownerId:action:arg
+      // customId 규칙: prefix:ownerId:action:arg  (ownerId가 '*'이면 공용 버튼 — 핸들러가 권한 검사)
       const [prefix, ownerId, action, arg] = interaction.customId.split(':');
       const handler = buttonHandlers.get(prefix);
       if (!handler) return;
-      if (ownerId !== interaction.user.id) {
+      if (ownerId !== '*' && ownerId !== interaction.user.id) {
         return interaction.reply({
           content: '🙅 다른 사람의 게임은 조작할 수 없어요. 명령어로 직접 시작해 보세요!',
           flags: MessageFlags.Ephemeral,

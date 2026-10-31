@@ -64,11 +64,19 @@ module.exports = {
   },
 
   POKER: {
-    MAX_EXPOSURE: 9, // 앤티 대비 최대 손실 배수 (앤티1 + 플롭2 + 턴2 + 리버4)
-    SIMULATIONS: 400, // 딜러 AI 몬테카를로 반복 횟수
-    REVEAL_ON_FOLD: true, // 다이 후에도 딜러 패·블러핑 여부 공개 (판독 학습용)
-    DEALER_SHOWS_ONE: false, // true면 딜러 핸드 1장을 공개하는 변형 룰
-    IDLE_MS: 90_000,
+    MAX_BOTS: 5,
+    MAX_HUMANS: 6, // 호스트 포함
+    MAX_SEATS: 8, // 봇 + 사람 합계 상한
+    MAX_BETS_PER_STREET: 3, // 베팅 1 + 레이즈 2
+    RIVER_MULTIPLIER: 2, // 리버 베팅 단위 = 앤티 × 2
+    // 최대 손실 = 앤티 × (1 + 3 × (1 + 1 + 2)) = 앤티 × 13 → 참가 시 이만큼 잔고 필요
+    SIMULATIONS: 300, // 봇 몬테카를로 반복 횟수
+    LOBBY_MS: 120_000, // 모집 시간 (끝나면 2좌석 이상일 때 자동 시작)
+    TURN_MS: 45_000, // 사람 차례 제한 시간 (초과 시 체크 가능하면 체크, 아니면 다이)
+    BOT_THINK_MS: 1_100,
+    STREET_PAUSE_MS: 900,
+    REVEAL_FOLDED_BOTS: true, // 종료 후 폴드한 봇의 패도 공개 (판독 학습용)
+    BOT_NAMES: ['알파', '브라보', '찰리', '델타', '에코'],
   },
 
   BACCARAT: {

@@ -12,6 +12,8 @@ const slot = require('../src/engine/slot');
 const crash = require('../src/engine/crash');
 const dice = require('../src/engine/dice');
 const poker = require('../src/engine/poker');
+const { PokerTable } = require('../src/engine/pokerTable');
+const { shuffle } = require('../src/utils/rng');
 const bac = require('../src/engine/baccarat');
 const { LiveMessage } = require('../src/utils/liveMessage');
 
@@ -110,11 +112,53 @@ test('포커: 족보 판정', () => {
   assert.equal(e('8s 8h 8d 8c 2h 3c 4d').name, '포카드');
 });
 
-test('포커: 몬테카를로 승률이 상식 범위', () => {
-  const aa = poker.simulate(H('Ah As'), H('2c 7d 9s'), 2000);
-  const junk = poker.simulate(H('2h 3d'), H('Kc Qd 9s'), 2000);
-  assert.ok(aa.equity > 0.75, `AA=${aa.equity}`);
-  assert.ok(junk.equity < 0.3, `23o=${junk.equity}`);
+test('포커: 몬테카를로 승률이 상식 범위 (다자간일수록 감소)', () => {
+  const aa1 = poker.simulate(H('Ah As'), H('2c 7d 9s'), 1, 2000).equity;
+  const aa5 = poker.simulate(H('Ah As'), H('2c 7d 9s'), 5, 2000).equity;
+  const junk = poker.simulate(H('2h 3d'), H('Kc Qd 9s'), 1, 2000).equity;
+  assert.ok(aa1 > 0.75, `AA vs 1 = ${aa1}`);
+  assert.ok(aa5 < aa1 && aa5 > 0.4, `AA vs 5 = ${aa5}`);
+  assert.ok(junk < 0.3, `23o = ${junk}`);
+});
+
+test('포커 테이블: 봇끼리 다자간 1,000판 — 칩 보존 & 최대 손실 한도', () => {
+  const styles = Object.values(poker.BOT_STYLES);
+  const ante = 100;
+  const exposure = PokerTable.maxExposure(3, 2);
+  for (let g = 0; g < 1000; g++) {
+    const n = 2 + (g % 7); // 2~8좌석
+    const t = new PokerTable({ ante, maxBetsPerStreet: 3, riverMultiplier: 2 });
+    for (let i = 0; i < n; i++) t.addSeat({ id: `b${i}`, style: styles[i % styles.length] });
+    t.start(shuffle(createDecks(1)), g);
+    let guard = 0;
+    while (!t.finished) {
+      const idx = t.actor;
+      const lg = t.legal(idx);
+      const a = poker.analyze(t.seats[idx].hole, t.visibleBoard, t.activeIndexes.length - 1, 30);
+      const d = poker.botDecide(a, { opponents: t.activeIndexes.length - 1, toCall: lg.toCall, pot: t.pot, canRaise: lg.canRaise, street: t.street }, t.seats[idx].style);
+      t.act(idx, d.act);
+      assert.ok(++guard < 200, '무한 루프');
+    }
+    const sum = t.results.reduce((s, r) => s + r.net, 0);
+    assert.equal(sum, 0, '팟은 정확히 분배되어야 함');
+    for (const r of t.results) assert.ok(-r.net <= ante * exposure, `손실 ${-r.net} > 한도`);
+    assert.ok(t.results.some((r) => r.winner));
+  }
+});
+
+test('포커 테이블: 순서 위반·종료 후 액션 차단, 폴드 승리', () => {
+  const t = new PokerTable({ ante: 100 });
+  ['a', 'b', 'c'].forEach((id) => t.addSeat({ id }));
+  t.start(shuffle(createDecks(1)), 0); // 버튼 0 → 1, 2, 0 순서
+  assert.equal(t.actor, 1);
+  assert.throws(() => t.act(0, 'check'));
+  t.act(1, 'raise'); // 베팅 100
+  assert.deepEqual(t.pending, [2, 0]);
+  t.act(2, 'fold');
+  const ev = t.act(0, 'fold');
+  assert.equal(ev.type, 'end');
+  assert.equal(t.results[1].net, 300 + 100 - 200); // 팟 400 - 자기 투입 200
+  assert.throws(() => t.act(1, 'check'));
 });
 
 test('바카라: 서드 카드 규칙 & 알려진 확률 (B 45.9% / P 44.6% / T 9.5%)', () => {

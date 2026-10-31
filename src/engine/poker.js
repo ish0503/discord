@@ -68,20 +68,19 @@ function evaluate(cards) {
 }
 
 /**
- * 딜러 관점 몬테카를로 시뮬레이션.
- * 딜러는 유저 카드를 모르므로 상대 핸드·남은 보드를 무작위로 채워 승률을 추정한다.
+ * 몬테카를로 승률 추정 (다자간).
+ * 자신은 상대 카드를 모르므로 상대 핸드·남은 보드를 무작위로 채워 반복 시뮬레이션한다.
  * (AI 추정 전용 난수 — 실제 카드 결과에는 쓰이지 않으므로 빠른 Math.random 사용)
  *
  * @returns {{ equity, strongMadeProb }}
- *   equity: 현재 승률(무승부 0.5), strongMadeProb: 리버까지 스트레이트 이상 메이드 확률
+ *   equity: 승률(공동 1위는 지분만큼), strongMadeProb: 리버까지 스트레이트 이상 메이드 확률
  */
-function simulate(dealerHole, board, iterations = 400, rand = Math.random) {
-  const known = new Set([...dealerHole, ...board].map(cardKey));
+function simulate(hole, board, opponents = 1, iterations = 300, rand = Math.random) {
+  const known = new Set([...hole, ...board].map(cardKey));
   const pool = createDecks(1).filter((c) => !known.has(cardKey(c)));
   const need = 5 - board.length;
-  const k = 2 + need;
-  let win = 0;
-  let tie = 0;
+  const k = opponents * 2 + need;
+  let equity = 0;
   let strong = 0;
 
   for (let it = 0; it < iterations; it++) {
@@ -89,14 +88,22 @@ function simulate(dealerHole, board, iterations = 400, rand = Math.random) {
       const r = j + Math.floor(rand() * (pool.length - j));
       [pool[j], pool[r]] = [pool[r], pool[j]];
     }
-    const fullBoard = board.concat(pool.slice(2, 2 + need));
-    const d = evaluate([...dealerHole, ...fullBoard]);
-    const o = evaluate([pool[0], pool[1], ...fullBoard]);
-    if (d.score > o.score) win++;
-    else if (d.score === o.score) tie++;
-    if (d.category >= 4) strong++;
+    const fullBoard = board.concat(pool.slice(opponents * 2, opponents * 2 + need));
+    const mine = evaluate([...hole, ...fullBoard]).score;
+    let best = 0;
+    let tiedBest = 0;
+    for (let o = 0; o < opponents; o++) {
+      const sc = evaluate([pool[o * 2], pool[o * 2 + 1], ...fullBoard]).score;
+      if (sc > best) {
+        best = sc;
+        tiedBest = 1;
+      } else if (sc === best) tiedBest++;
+    }
+    if (mine > best) equity += 1;
+    else if (mine === best) equity += 1 / (tiedBest + 1);
+    if (Math.floor(mine / 15 ** 5) >= 4) strong++;
   }
-  return { equity: (win + tie / 2) / iterations, strongMadeProb: strong / iterations };
+  return { equity: equity / iterations, strongMadeProb: strong / iterations };
 }
 
 /** 보드 위험도 0~1 (플러시·스트레이트·페어 가능성) — 블러핑 빈도에 반영 */
@@ -122,48 +129,71 @@ function boardScare(board) {
   return Math.min(1, scare);
 }
 
-/** 딜러의 현재 상황 분석 */
-function analyze(dealerHole, visibleBoard, iterations) {
-  const sim = simulate(dealerHole, visibleBoard, iterations);
+/** 봇의 현재 상황 분석 */
+function analyze(hole, visibleBoard, opponents, iterations) {
   return {
-    ...sim,
-    current: evaluate([...dealerHole, ...visibleBoard]),
+    ...simulate(hole, visibleBoard, opponents, iterations),
+    current: evaluate([...hole, ...visibleBoard]),
     scare: boardScare(visibleBoard),
   };
 }
 
 /**
- * 딜러 선(先) 액션.
- * kind: value(진짜 패) / semibluff(드로우 기반) / bluff(뻥카) / slowplay / check
+ * 봇 성향. tight: 베팅에 필요한 상대 강도 배수, aggr: 공격 빈도, bluff: 블러핑 빈도, loose: 콜 관대함
+ * 성향은 게임이 끝날 때 공개된다 (판독 학습용).
  */
-function decideOpen(a, street, rand = Math.random) {
-  if (a.equity >= 0.7) return rand() < 0.8 ? { act: 'bet', kind: 'value' } : { act: 'check', kind: 'slowplay' };
-  if (a.equity >= 0.5) return rand() < 0.55 ? { act: 'bet', kind: 'value' } : { act: 'check', kind: 'check' };
-  const drawing = street !== '리버' && a.current.category < 4 && a.strongMadeProb >= 0.25;
-  if (drawing && rand() < 0.5) return { act: 'bet', kind: 'semibluff' };
-  const bluffRate = 0.1 + 0.2 * a.scare + (street === '리버' ? 0.08 : 0);
-  if (rand() < bluffRate) return { act: 'bet', kind: 'bluff' };
-  return { act: 'check', kind: 'check' };
-}
+const BOT_STYLES = {
+  rock: { label: '🪨 바위 (타이트·패시브)', tight: 1.25, aggr: 0.6, bluff: 0.3, loose: -0.04 },
+  shark: { label: '🦈 상어 (타이트·공격적)', tight: 1.1, aggr: 1.25, bluff: 0.9, loose: 0 },
+  maniac: { label: '🎭 블러퍼 (루즈·공격적)', tight: 0.85, aggr: 1.45, bluff: 2.2, loose: 0.04 },
+  station: { label: '📞 콜링스테이션 (루즈·패시브)', tight: 0.8, aggr: 0.45, bluff: 0.3, loose: 0.15 },
+};
 
-/** 유저 레이즈에 대한 딜러 응답: 'call' | 'fold' */
-function decideFacingRaise(a, toCall, pot, rand = Math.random) {
-  const potOdds = toCall / (pot + toCall);
-  if (a.equity >= 0.6) return 'call';
-  if (a.equity >= potOdds + 0.05) return 'call';
-  if (rand() < 0.1) return 'call'; // 히어로 콜
-  return 'fold';
+/**
+ * 봇 액션 결정.
+ * strength = 승률 / (1 / 인원수) — 1이면 테이블 평균, 2면 평균의 두 배.
+ * 상대가 많을수록 블러핑 빈도는 줄어든다 (실제 포커 이론과 동일한 경향).
+ *
+ * @param a   analyze() 결과
+ * @param ctx { opponents, toCall, pot, canRaise, street }
+ * @returns { act: 'check'|'call'|'raise'|'fold', kind }
+ *   kind: value(진짜 패) / semibluff(드로우) / bluff(뻥카) / slowplay / check / call / fold
+ */
+function botDecide(a, ctx, style, rand = Math.random) {
+  const n = Math.max(1, ctx.opponents);
+  const strength = a.equity * (n + 1);
+  const drawing = ctx.street !== '리버' && a.current.category < 4 && a.strongMadeProb >= 0.25;
+  const bluffRate = ((0.08 + 0.15 * a.scare + (ctx.street === '리버' ? 0.06 : 0)) * style.bluff) / n;
+  // 베팅·레이즈의 "실제 의도"는 결정 경로가 아니라 당시 패 강도로 분류해 기록한다
+  const aggressive = () => ({ act: 'raise', kind: strength >= 1 ? 'value' : drawing ? 'semibluff' : 'bluff' });
+
+  if (ctx.toCall === 0) {
+    if (strength >= 1.8 * style.tight) {
+      return rand() < Math.min(0.95, 0.8 * style.aggr) ? aggressive() : { act: 'check', kind: 'slowplay' };
+    }
+    if (strength >= 1.25 * style.tight && rand() < 0.5 * style.aggr) return aggressive();
+    if (drawing && rand() < 0.4 * style.aggr) return aggressive();
+    if (rand() < bluffRate) return aggressive();
+    return { act: 'check', kind: 'check' };
+  }
+
+  const potOdds = ctx.toCall / (ctx.pot + ctx.toCall);
+  if (ctx.canRaise && strength >= 2 * style.tight && rand() < 0.7 * style.aggr) return aggressive();
+  if (ctx.canRaise && drawing && rand() < 0.15 * style.aggr) return aggressive();
+  if (ctx.canRaise && rand() < bluffRate * 0.4) return aggressive();
+  if (a.equity >= potOdds + 0.03 - style.loose) return { act: 'call', kind: 'call' };
+  return { act: 'fold', kind: 'fold' };
 }
 
 module.exports = {
   RANK_VALUE,
   CATEGORY_NAMES,
   STREETS,
+  BOT_STYLES,
   evaluate,
   straightHigh,
   simulate,
   boardScare,
   analyze,
-  decideOpen,
-  decideFacingRaise,
+  botDecide,
 };
