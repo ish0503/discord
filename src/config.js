@@ -9,7 +9,14 @@ module.exports = {
   MIN_BET: 100,
   MAX_BET: 1_000_000,
   SESSION_IDLE_MS: 60_000, // 버튼 무반응 시 자동 처리까지의 시간
-  SESSION_HARD_LIMIT_MS: 14 * 60_000, // 인터랙션 토큰(15분) 만료 전 강제 종료
+  SESSION_HARD_LIMIT_MS: 14 * 60_000, // 인터랙션 토큰(15분) 만료 전 강제 종료 (테이블 참가 마커는 제외)
+
+  ECONOMY: {
+    // 에스크로(게임에 묶인 칩)가 이 시간 넘게 정산되지 않으면 자동 환불 (서버 다운·크래시 복구)
+    ESCROW_TTL_MS: 20 * 60_000,
+    ESCROW_SWEEP_MS: 60_000,
+    LOG_RETENTION_DAYS: 90, // GameLog 자동 삭제 (TTL 인덱스)
+  },
 
   BAILOUT: {
     AMOUNT: 5_000,
@@ -24,6 +31,11 @@ module.exports = {
     BLACKJACK_PAYS: 1.5, // 3:2
     DEALER_HITS_SOFT_17: false, // false = S17 (소프트 17 스탠드)
     DEALER_STEP_MS: 700,
+    MAX_PLAYERS: 5,
+    LOBBY_MS: 60_000, // 모집 시간 (끝나면 첫 베팅 라운드 자동 시작)
+    BET_MS: 20_000, // 베팅 시간 (전원 베팅 시 즉시 딜)
+    TURN_MS: 30_000, // 플레이어 차례 제한 (초과 시 자동 스탠드)
+    IDLE_ROUNDS_TO_CLOSE: 2, // 연속으로 아무도 베팅하지 않으면 테이블 종료
   },
 
   SLOT: {
@@ -59,7 +71,7 @@ module.exports = {
       ENABLED: true,
       STREAK: 4, // 이 횟수 이상 연패 중일 때
       REROLL_CHANCE: 0.15, // 패배 결과를 1회 재굴림할 확률 (승률 약 +3.6%p)
-      SHOW_TO_USER: false, // true면 보정 발동 시 화면에 표시
+      SHOW_TO_USER: true, // 보정 활성 상태와 보정 후 확률을 화면에 공개 (false면 내부 처리)
     },
   },
 
@@ -85,5 +97,10 @@ module.exports = {
     PAYOUT: { player: 2, banker: 1.95, tie: 9 }, // 뱅커 5% 커미션, 타이 8:1
     HISTORY_SIZE: 5,
     DEAL_MS: 500,
+    BET_OPTIONS: [1_000, 5_000, 10_000, 50_000],
+    MAX_PLAYERS: 6,
+    LOBBY_MS: 60_000,
+    BET_MS: 20_000,
+    IDLE_ROUNDS_TO_CLOSE: 2,
   },
 };

@@ -13,6 +13,7 @@ const crash = require('../src/engine/crash');
 const dice = require('../src/engine/dice');
 const poker = require('../src/engine/poker');
 const { PokerTable } = require('../src/engine/pokerTable');
+const { BlackjackRound } = require('../src/engine/blackjackTable');
 const { shuffle } = require('../src/utils/rng');
 const bac = require('../src/engine/baccarat');
 const { LiveMessage } = require('../src/utils/liveMessage');
@@ -65,6 +66,60 @@ test('슬롯: 이론 RTP 90~97% 범위, 몬테카를로 일치', () => {
   const N = 200_000;
   for (let i = 0; i < N; i++) paid += slot.evaluate(slot.spin(SYMBOLS), PAYTABLE).multiplier;
   assert.ok(Math.abs(paid / N - rtp) < 0.03, `sim=${paid / N}, theory=${rtp}`);
+});
+
+test('블랙잭 테이블: 다인 라운드 진행·판정 불변식 (2,000라운드)', () => {
+  const shoe = new Shoe({ decks: 6, reshuffleAt: 60 });
+  for (let g = 0; g < 2000; g++) {
+    shoe.prepareRound();
+    const n = 1 + (g % 5);
+    const r = new BlackjackRound(shoe, Array.from({ length: n }, (_, k) => ({ id: `p${k}`, bet: 1000 })));
+    r.deal();
+    let guard = 0;
+    while (r.actor !== null) {
+      const i = r.actor;
+      const total = bj.handValue(r.hands[i].cards).total;
+      const act = r.canDouble(i) && (total === 10 || total === 11) ? 'double' : total < 17 ? 'hit' : 'stand';
+      r.act(i, act);
+      assert.ok(++guard < 100);
+    }
+    r.revealHole();
+    while (r.dealerShouldDraw) r.dealerDraw();
+    const res = r.results();
+    assert.equal(r.holeHidden, false, '라운드 종료 시 홀카드는 공개·카운트되어야 함');
+    res.forEach((x, k) => {
+      const h = r.hands[k];
+      assert.ok(x.payout >= 0 && x.payout <= h.bet * 2.5, `payout ${x.payout}`);
+      if (h.status === 'bust') assert.equal(x.payout, 0);
+      if (h.doubled) assert.equal(h.bet, 2000);
+    });
+    if (r.hands.every((h) => h.status === 'bust')) assert.equal(r.dealer.length, 2, '전원 버스트면 딜러는 드로우하지 않음');
+  }
+});
+
+test('블랙잭 테이블: 딜러 블랙잭 피크 & 순서 위반 차단', () => {
+  const shoe = new Shoe({ decks: 1, reshuffleAt: 0 });
+  // pop 순서: p0, p1, 딜러업, p0, p1, 홀
+  shoe.cards = H('Kh 9s Ac As 5d Qs').reverse(); // p0=K+A, p1=9+5, 딜러=A+Q
+  shoe.runningCount = 0;
+  const r = new BlackjackRound(shoe, [{ id: 'a', bet: 1000 }, { id: 'b', bet: 1000 }]);
+  r.deal();
+  assert.equal(r.dealerBlackjack, true);
+  assert.equal(r.actor, null);
+  const [a, b] = r.results();
+  assert.equal(a.payout, 1000, 'A+K 블랙잭 vs 딜러 블랙잭 = 푸시');
+  assert.equal(b.payout, 0);
+
+  shoe.cards = H('9h 8s 6c 2c 3d Ks').reverse();
+  const r2 = new BlackjackRound(shoe, [{ id: 'a', bet: 1000 }, { id: 'b', bet: 1000 }]);
+  r2.deal();
+  assert.equal(r2.actor, 0);
+  assert.throws(() => r2.act(1, 'stand'));
+  const rcBeforeReveal = shoe.runningCount;
+  r2.act(0, 'stand');
+  r2.act(1, 'stand');
+  r2.revealHole();
+  assert.equal(shoe.runningCount, rcBeforeReveal - 1, 'K 홀카드 공개 시 -1');
 });
 
 test('그래프: P(crash ≥ x) ≈ 0.97/x, 1 미만 없음', () => {

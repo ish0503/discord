@@ -69,11 +69,19 @@ async function bust(s) {
   s.state = 'bust';
   sessions.end(s); // cleanup → 타이머 정리
   s.history.push(s.crashPoint);
-  const doc = await wallet.settle(s.userId, s.guildId, -s.bet, { inc: { crashRounds: 1 }, wagered: s.bet }).catch((e) => {
-    console.error('[crash settle]', e);
-    return null;
-  });
-  s.balanceAfter = doc?.money ?? s.balance - s.bet;
+  const st = await wallet
+    .settleRound(s.userId, s.roundId, 0, {
+      game: 'crash',
+      guildId: s.guildId,
+      inc: { crashRounds: 1 },
+      wagered: s.bet,
+      detail: { crashPoint: s.crashPoint, cashedAt: null },
+    })
+    .catch((e) => {
+      console.error('[crash settle]', e);
+      return { ok: false };
+    });
+  s.balanceAfter = st.ok ? st.balance : s.balance;
   await s.live.final(payload(s, { state: 'bust', net: -s.bet })).catch(() => {});
 }
 
@@ -103,14 +111,16 @@ module.exports = {
     await i.deferReply();
 
     const account = await wallet.getAccount(i.user.id, i.guildId);
-    if (account.money < bet) {
+    const r = await wallet.reserve(i.user.id, i.guildId, 'crash', bet);
+    if (!r) {
       sessions.end(s);
       return i.editReply(`잔고가 부족해요. (현재 ${chips(account.money)})`);
     }
+    s.roundId = r.roundId;
 
     // 폭발 배수 선 연산 — 이후 어떤 입력도 이 값을 바꾸지 않는다
     s.crashPoint = crash.generateCrashPoint(CR.HOUSE_EDGE, CR.MAX_MULTIPLIER);
-    s.balance = account.money;
+    s.balance = r.balance;
     s.history = [1];
     s.live = new LiveMessage((p) => i.editReply(p));
     s.startAt = Date.now();
@@ -144,12 +154,15 @@ module.exports = {
     s.history.push(m);
 
     await i.deferUpdate();
-    const doc = await wallet.settle(s.userId, s.guildId, net, {
+    const st = await wallet.settleRound(s.userId, s.roundId, payout, {
+      game: 'crash',
+      guildId: s.guildId,
       inc: { crashRounds: 1 },
       max: { crashMaxMultiplier: m },
       wagered: s.bet,
+      detail: { crashPoint: s.crashPoint, cashedAt: m },
     });
-    s.balanceAfter = doc?.money ?? s.balance + net;
+    s.balanceAfter = st.ok ? st.balance : s.balance;
     await s.live.final(payload(s, { state: 'cashed', m, net }));
   },
 };

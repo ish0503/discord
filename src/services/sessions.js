@@ -18,7 +18,10 @@ class SessionManager {
   }
 
   /** 새 세션. 이미 진행 중인 게임이 있으면 null */
-  start(userId, game, data = {}, { idleMs = config.SESSION_IDLE_MS, onTimeout = null } = {}) {
+  /**
+   * @param opts.persistent true면 장기 세션 강제 종료(sweep) 대상에서 제외 — 여러 판 이어지는 테이블 참가 마커용
+   */
+  start(userId, game, data = {}, { idleMs = config.SESSION_IDLE_MS, onTimeout = null, persistent = false } = {}) {
     if (this.sessions.has(userId)) return null;
     const session = {
       userId,
@@ -30,6 +33,7 @@ class SessionManager {
       idleMs,
       onTimeout,
       cleanup: null,
+      persistent,
       ...data,
     };
     this.sessions.set(userId, session);
@@ -72,7 +76,7 @@ class SessionManager {
   #sweep() {
     const now = Date.now();
     for (const s of this.sessions.values()) {
-      if (now - s.startedAt > config.SESSION_HARD_LIMIT_MS) {
+      if (!s.persistent && now - s.startedAt > config.SESSION_HARD_LIMIT_MS) {
         console.warn(`[session] 장기 세션 강제 종료: ${s.userId} (${s.game})`);
         this.end(s);
       }

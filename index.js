@@ -5,6 +5,8 @@ const { Client, GatewayIntentBits, Events, MessageFlags } = require('discord.js'
 const { connectDB } = require('./src/db/connect');
 const { loadCommands, registerCommands } = require('./src/registerCommands');
 const sessions = require('./src/services/sessions');
+const wallet = require('./src/services/wallet');
+const config = require('./src/config');
 
 const { DISCORD_TOKEN, MONGODB_URI, CLIENT_ID, DEV_GUILD_ID, REGISTER_COMMANDS } = process.env;
 for (const [key, val] of Object.entries({ DISCORD_TOKEN, MONGODB_URI })) {
@@ -81,9 +83,26 @@ const server = http
   })
   .listen(port, () => console.log(`🩺 헬스 체크 서버 :${port}`));
 
+/** 오래 정산되지 않은 에스크로 환불 (다른 인스턴스·이전 프로세스가 비정상 종료한 경우) */
+async function sweepEscrow() {
+  try {
+    const n = await wallet.refundStale();
+    if (n) console.log(`♻️ 미정산 판 ${n}건 자동 환불`);
+  } catch (err) {
+    console.error('[escrow sweep]', err.message);
+  }
+}
+
+let shuttingDown = false;
 async function shutdown(signal) {
-  console.log(`🛑 ${signal} 수신 — 종료 중 (진행 중 게임 ${sessions.size}개는 정산 없이 폐기)`);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`🛑 ${signal} 수신 — 진행 중 게임 ${sessions.size}개 종료, 이 프로세스의 미정산 판 환불`);
   sessions.shutdown();
+  await wallet
+    .refundOwn()
+    .then((n) => n && console.log(`♻️ 진행 중이던 판 ${n}건 환불`))
+    .catch((err) => console.error('[shutdown refund]', err.message));
   server.close();
   await client.destroy();
   await mongoose.disconnect().catch(() => {});
@@ -95,6 +114,8 @@ process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', 
 
 (async () => {
   await connectDB(MONGODB_URI);
+  await sweepEscrow();
+  setInterval(sweepEscrow, config.ECONOMY.ESCROW_SWEEP_MS).unref();
   await client.login(DISCORD_TOKEN);
 })().catch((err) => {
   console.error('❌ 시작 실패:', err);

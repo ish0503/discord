@@ -47,30 +47,36 @@ function payload(s, reels, { result = null, spinning = false, ended = false } = 
 }
 
 async function spin(i, s) {
-  if (s.balance < s.bet) return i.followUp(ephemeral(`잔고가 부족해요. (현재 ${chips(s.balance)})`));
+  // 1) 베팅 즉시 칩을 에스크로로 이동 (잔고 부족이면 DB 조건에서 거절)
+  const r = await wallet.reserve(s.userId, s.guildId, 'slot', s.bet);
+  if (!r) return i.followUp(ephemeral('잔고가 부족해요. `/잔고`로 확인해 보세요.'));
+  s.balance = r.balance;
 
-  // 1) 버튼을 누른 즉시 결과 선 연산
+  // 2) 결과 선 연산
   const reels = slot.spin(SL.SYMBOLS);
   const { multiplier, label } = slot.evaluate(reels, SL.PAYTABLE);
   const payout = Math.floor(s.bet * multiplier);
-  const net = payout - s.bet;
 
-  // 2) 0.4초 간격으로 한 칸씩 공개
+  // 3) 0.4초 간격으로 한 칸씩 공개
   const frame = [BLANK, BLANK, BLANK];
   await i.editReply(payload(s, frame, { spinning: true }));
-  for (let r = 0; r < 3; r++) {
+  for (let k = 0; k < 3; k++) {
     await sleep(SL.REEL_DELAY_MS);
-    frame[r] = reels[r];
-    if (r < 2) await i.editReply(payload(s, frame, { spinning: true }));
+    frame[k] = reels[k];
+    if (k < 2) await i.editReply(payload(s, frame, { spinning: true }));
   }
 
-  // 3) 정산 후 최종 화면
-  const doc = await wallet.settle(s.userId, s.guildId, net, {
+  // 4) 정산 (같은 roundId는 한 번만 반영)
+  const st = await wallet.settleRound(s.userId, r.roundId, payout, {
+    game: 'slot',
+    guildId: s.guildId,
     inc: { slotSpins: 1 },
     max: { slotBestWin: payout },
     wagered: s.bet,
+    detail: { reels, multiplier },
   });
-  s.balance = doc?.money ?? s.balance + net;
+  if (st.ok) s.balance = st.balance;
+  const net = payout - s.bet;
   await i.editReply(payload(s, reels, { result: { net, label: multiplier >= 50 ? `🎉 JACKPOT! ${label}` : label } }));
 }
 

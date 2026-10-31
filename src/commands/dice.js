@@ -11,11 +11,20 @@ const PREFIX = 'dc';
 const FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 const cid = (uid, action) => `${PREFIX}:${uid}:${action}:`;
 
-/** 연패 기록 (메모리 — 재시작 시 초기화) */
-const lossStreaks = new Map();
+const assistActive = (streak) => DC.ASSIST.ENABLED && streak >= DC.ASSIST.STREAK;
+/** 보정 중 실제 승률 = p + (1 − p) · c · p */
+const assistedProb = (p) => p + (1 - p) * DC.ASSIST.REROLL_CHANCE * p;
 
-const oddsText = () =>
-  dice.CHOICES.map((c) => `${dice.CHOICE_LABEL[c]} ${(dice.PROBABILITY[c] * 100).toFixed(1)}% · ×${DC.PAYOUT[c]}`).join('\n');
+function oddsText(streak) {
+  const on = assistActive(streak) && DC.ASSIST.SHOW_TO_USER;
+  const lines = dice.CHOICES.map((c) => {
+    const p = dice.PROBABILITY[c];
+    const adj = on ? ` → 보정 ${(assistedProb(p) * 100).toFixed(1)}%` : '';
+    return `${dice.CHOICE_LABEL[c]} ${(p * 100).toFixed(1)}%${adj} · ×${DC.PAYOUT[c]}`;
+  });
+  if (on) lines.push(`🍀 연패 보정 활성 (${streak}연패): 지면 ${DC.ASSIST.REROLL_CHANCE * 100}% 확률로 1회 재굴림`);
+  return lines.join('\n');
+}
 
 function rows(s, { disabled = false } = {}) {
   const off = disabled || s.balance < s.bet;
@@ -33,15 +42,16 @@ function payload(s, { faces = ['🎲', '🎲'], line = '방향을 고르세요!'
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle(`🎲 주사위 Hi-Lo-7 · 베팅 ${chips(s.bet)}`)
-    .setDescription(`**[ ${faces.join('  ')} ]**\n${line}\n\n\`\`\`\n${oddsText()}\n\`\`\`💼 잔고 ${chips(s.balance)}`);
+    .setDescription(`**[ ${faces.join('  ')} ]**\n${line}\n\n\`\`\`\n${oddsText(s.streak)}\n\`\`\`💼 잔고 ${chips(s.balance)}`);
   return { embeds: [embed], components: rows(s, { disabled }) };
 }
 
 async function roll(i, s, choice) {
-  if (s.balance < s.bet) return i.followUp(ephemeral(`잔고가 부족해요. (현재 ${chips(s.balance)})`));
+  const r = await wallet.reserve(s.userId, s.guildId, 'dice', s.bet);
+  if (!r) return i.followUp(ephemeral('잔고가 부족해요. `/잔고`로 확인해 보세요.'));
+  s.balance = r.balance;
 
-  const streak = lossStreaks.get(s.userId) || 0;
-  const res = dice.play(choice, { lossStreak: streak, assist: DC.ASSIST });
+  const res = dice.play(choice, { lossStreak: s.streak, assist: DC.ASSIST });
 
   // 굴리는 연출 (결과는 이미 결정됨)
   for (let f = 0; f < DC.ROLL_FRAMES; f++) {
@@ -52,16 +62,22 @@ async function roll(i, s, choice) {
 
   const payout = res.win ? Math.floor(s.bet * DC.PAYOUT[choice]) : 0;
   const net = payout - s.bet;
-  lossStreaks.set(s.userId, res.win ? 0 : streak + 1);
-
-  const doc = await wallet.settle(s.userId, s.guildId, net, {
+  const streak = res.win ? 0 : s.streak + 1;
+  const st = await wallet.settleRound(s.userId, r.roundId, payout, {
+    game: 'dice',
+    guildId: s.guildId,
     inc: { diceRolls: 1, ...(res.win ? { diceWins: 1 } : {}) },
+    set: { diceLossStreak: streak }, // 연패 기록도 DB에 → 재시작해도 유지
     wagered: s.bet,
+    detail: { choice, dice: res.dice, assisted: res.assisted, streakBefore: s.streak },
   });
-  s.balance = doc?.money ?? s.balance + net;
+  if (st.ok) {
+    s.balance = st.balance;
+    s.streak = streak;
+  }
 
   const faces = res.dice.map((d) => FACES[d - 1]);
-  const assistNote = res.assisted && DC.ASSIST.SHOW_TO_USER ? '\n🍀 연패 보정이 적용되었습니다.' : '';
+  const assistNote = res.assisted && DC.ASSIST.SHOW_TO_USER ? '\n🍀 연패 보정으로 재굴림된 결과입니다.' : '';
   const line = `합계 **${res.sum}** → ${dice.CHOICE_LABEL[res.result]}\n${res.win ? '🎉 적중!' : '😵 실패'} 순손익 **${netText(net)}**${assistNote}`;
   await i.editReply(payload(s, { faces, line, color: res.win ? COLOR.win : COLOR.lose }));
 }
@@ -88,6 +104,7 @@ module.exports = {
     await i.deferReply();
     const account = await wallet.getAccount(i.user.id, i.guildId);
     s.balance = account.money;
+    s.streak = account.diceLossStreak ?? 0;
     if (s.balance < bet) {
       sessions.end(s);
       return i.editReply(`잔고가 부족해요. (현재 ${chips(s.balance)})`);

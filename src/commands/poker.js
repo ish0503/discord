@@ -13,7 +13,7 @@ const poker = require('../engine/poker');
 const { PokerTable } = require('../engine/pokerTable');
 const { createDecks } = require('../engine/cards');
 const { shuffle, randomInt } = require('../utils/rng');
-const { LiveMessage } = require('../utils/liveMessage');
+const { displayName, unixIn, runExclusive, attachLive, captureMessage } = require('../utils/table');
 const { COLOR, chips, num, netText, handText, sleep, ephemeral, expired, busyText } = require('../utils/format');
 
 const PK = config.POKER;
@@ -32,23 +32,7 @@ const KIND_LABEL = {
 };
 const ACTION_TEXT = { fold: '🏳️ 다이', check: '✋ 체크', call: '📞 콜', bet: '💰 베팅', raise: '⬆️ 레이즈' };
 
-const displayName = (i) => i.member?.displayName ?? i.user.globalName ?? i.user.username;
 const seatCount = (t) => t.humans.length + t.bots;
-const unixIn = (ms) => Math.floor((Date.now() + ms) / 1000);
-
-async function runExclusive(t, fn) {
-  if (t.busy) return false;
-  t.busy = true;
-  try {
-    await fn();
-    return true;
-  } catch (err) {
-    console.error('[poker table]', err);
-    return false;
-  } finally {
-    t.busy = false;
-  }
-}
 
 // ───────────────────────────── 화면 ─────────────────────────────
 
@@ -185,7 +169,10 @@ function privateText(t, idx) {
 function updatePrivates(t) {
   t.engine.seats.forEach((s, idx) => {
     if (s.type === 'human' && s.privateEdit) {
-      s.privateEdit(privateText(t, idx)).catch(() => {}); // 토큰 만료 등은 무시 ([내 패] 버튼으로 대체 가능)
+      // 비공개 메시지 실패(토큰 만료 등)가 테이블 진행을 막지 않도록 격리 — [내 패] 버튼으로 대체 가능
+      Promise.resolve()
+        .then(() => s.privateEdit(privateText(t, idx)))
+        .catch(() => {});
     }
   });
 }
@@ -221,7 +208,7 @@ async function openTable(i, { ante, bots, maxHumans }) {
     lobbyEndsAt: unixIn(PK.LOBBY_MS),
   };
   marker.tableId = t.id;
-  t.live = new LiveMessage((p) => t.ui.editReply(p));
+  attachLive(t);
   tables.set(t.id, t);
 
   const host = { id: i.user.id, name: displayName(i), marker, privateEdit: null };
@@ -229,6 +216,7 @@ async function openTable(i, { ante, bots, maxHumans }) {
 
   const solo = maxHumans === 1;
   await i.editReply(lobbyPayload(t, solo ? '🃏 딜링 중...' : ''));
+  await captureMessage(t, i);
 
   // 호스트용 비공개 메시지 (게임 시작 시 내 패로 갱신)
   try {
@@ -261,9 +249,31 @@ async function startGame(t) {
   clearTimeout(t.lobbyTimer);
   t.state = 'playing';
 
+  // 최대 손실분(앤티 × EXPOSURE)을 시작 시점에 에스크로로 확보 → 판 도중 잔고 부족이 원천적으로 불가능
+  const reserved = [];
+  for (const h of [...t.humans]) {
+    const r = await wallet.reserve(h.id, t.guildId, 'poker', t.ante * EXPOSURE).catch(() => null);
+    if (r) {
+      h.roundId = r.roundId;
+      h.reserved = t.ante * EXPOSURE;
+      reserved.push(h);
+    } else {
+      t.humans = t.humans.filter((x) => x !== h);
+      sessions.end(h.marker);
+      Promise.resolve()
+        .then(() => h.privateEdit?.({ content: '⚠️ 시작 시점 잔고가 부족해 이번 테이블에서 제외되었습니다.' }))
+        .catch(() => {});
+    }
+  }
+  if (seatCount(t) < 2 || !t.humans.length) {
+    for (const h of reserved) await wallet.refund(h.id, h.roundId, 'table-cancelled').catch(console.error);
+    t.state = 'lobby';
+    return cancelTable(t, '⚠️ 잔고 부족으로 인원이 모자라 테이블이 취소되었습니다.');
+  }
+
   const styleKeys = Object.keys(poker.BOT_STYLES);
   const seats = [
-    ...t.humans.map((h) => ({ type: 'human', id: h.id, name: h.name, privateEdit: h.privateEdit })),
+    ...t.humans.map((h) => ({ type: 'human', id: h.id, name: h.name, privateEdit: h.privateEdit, roundId: h.roundId, reserved: h.reserved })),
     ...Array.from({ length: t.bots }, (_, k) => ({
       type: 'bot',
       id: `bot${k}`,
@@ -355,9 +365,13 @@ async function finishGame(t) {
       if (s.type !== 'human') return;
       const r = e.results[idx];
       try {
-        await wallet.settle(s.id, t.guildId, r.net, {
+        // 예약금 중 쓰지 않은 부분 + 획득한 팟
+        await wallet.settleRound(s.id, s.roundId, s.reserved - s.totalIn + r.won, {
+          game: 'poker',
+          guildId: t.guildId,
           inc: { pokerHands: 1, ...(r.winner && r.net > 0 ? { pokerWins: 1 } : {}) },
           wagered: s.totalIn,
+          detail: { hole: s.hole, board: e.board, hand: r.hand.name, endReason: t.endReason, seats: e.seats.length },
         });
       } catch (err) {
         console.error(`[poker settle] ${s.id}`, err);

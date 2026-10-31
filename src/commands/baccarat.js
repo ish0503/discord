@@ -1,16 +1,20 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+/**
+ * /바카라 — 채널 공유 8덱 슈를 여러 명이 함께 쓰는 바카라 테이블.
+ * 한 번의 딜에 테이블 전원이 각자 고른 쪽(플레이어/뱅커/타이)으로 승부한다.
+ */
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
-const sessions = require('../services/sessions');
 const wallet = require('../services/wallet');
 const { getShoe } = require('../services/shoes');
+const { RoundTableManager } = require('../services/roundTable');
 const bac = require('../engine/baccarat');
-const { COLOR, chips, num, netText, netColor, handText, sleep, ephemeral, expired, busyText } = require('../utils/format');
+const { COLOR, num, chips, netText, handText, sleep } = require('../utils/format');
 
 const BC = config.BACCARAT;
-const PREFIX = 'bc';
-const cid = (uid, action) => `${PREFIX}:${uid}:${action}:`;
+const SIDES = ['player', 'banker', 'tie'];
 const DOT = { player: '🔵', banker: '🔴', tie: '🟢' };
 const NAME = { player: '플레이어', banker: '뱅커', tie: '타이' };
+const STYLE = { player: ButtonStyle.Primary, banker: ButtonStyle.Danger, tie: ButtonStyle.Success };
 
 /** 흐름 보드: 이번 슈의 최근 결과 + 집계 (해석은 유저 몫) */
 function board(shoe) {
@@ -28,109 +32,130 @@ function board(shoe) {
   ].join('\n');
 }
 
-function rows(s, { disabled = false } = {}) {
-  const off = disabled || s.balance < s.bet;
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(cid(s.userId, 'player')).setLabel(`플레이어 ×${BC.PAYOUT.player}`).setEmoji('🔵').setStyle(ButtonStyle.Primary).setDisabled(off),
-      new ButtonBuilder().setCustomId(cid(s.userId, 'banker')).setLabel(`뱅커 ×${BC.PAYOUT.banker}`).setEmoji('🔴').setStyle(ButtonStyle.Danger).setDisabled(off),
-      new ButtonBuilder().setCustomId(cid(s.userId, 'tie')).setLabel(`타이 ×${BC.PAYOUT.tie}`).setEmoji('🟢').setStyle(ButtonStyle.Success).setDisabled(off),
-      new ButtonBuilder().setCustomId(cid(s.userId, 'stop')).setLabel('그만').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
-    ),
-  ];
-}
-
-function payload(s, { table = '', line = '어느 쪽에 거시겠습니까?', color = COLOR.table, disabled = false } = {}) {
-  const embed = new EmbedBuilder()
-    .setColor(color)
-    .setTitle(`🎴 바카라 · 베팅 ${chips(s.bet)}`)
-    .setDescription([board(s.shoe), '', table, line, '', `💼 잔고 ${chips(s.balance)}`].filter((x, k, a) => x !== '' || a[k - 1] !== '').join('\n'))
-    .setFooter({ text: `${BC.DECKS}덱 슈 · 타이 시 플레이어/뱅커 베팅은 푸시 · 뱅커 승 5% 커미션` });
-  return { embeds: [embed], components: rows(s, { disabled }) };
-}
-
 function tableText(player, banker) {
   const pt = player.length ? bac.total(player) : '-';
   const bt = banker.length ? bac.total(banker) : '-';
   return `🔵 **플레이어** ${handText(player) || '…'}  \`${pt}\`\n🔴 **뱅커** ${handText(banker) || '…'}  \`${bt}\``;
 }
 
-async function deal(i, s, side) {
-  if (s.balance < s.bet) return i.followUp(ephemeral(`잔고가 부족해요. (현재 ${chips(s.balance)})`));
+const LEGEND = `🔵 플레이어 ×${BC.PAYOUT.player} · 🔴 뱅커 ×${BC.PAYOUT.banker} · 🟢 타이 ×${BC.PAYOUT.tie} (타이 시 P/B 베팅은 반환)`;
 
-  const reshuffled = s.shoe.prepareRound();
-  const round = bac.playRound(() => s.shoe.draw()); // 결과 선 연산
+const mgr = new RoundTableManager({
+  prefix: 'bc',
+  game: 'baccarat',
+  title: '바카라',
+  color: COLOR.table,
+  cfg: BC,
 
-  // 카드 한 장씩 공개 연출
-  const shownP = [];
-  const shownB = [];
-  const intro = `${reshuffled ? '🔄 새 슈로 교체! ' : ''}${DOT[side]} **${NAME[side]}**에 베팅`;
-  for (const { side: who, card } of round.order) {
-    (who === 'player' ? shownP : shownB).push(card);
-    await i.editReply(payload(s, { table: tableText(shownP, shownB), line: intro, disabled: true }));
-    await sleep(BC.DEAL_MS);
-  }
+  titleFor(t) {
+    return `🎴 바카라 테이블 · 슈 #${getShoe('baccarat', t.channelId).shoeNumber}`;
+  },
 
-  s.shoe.history.push(round.winner);
-  const { net, push } = bac.settle(side, round.winner, s.bet, BC.PAYOUT);
-  const doc = await wallet.settle(s.userId, s.guildId, net, {
-    inc: { baccaratRounds: 1, ...(net > 0 ? { baccaratWins: 1 } : {}) },
-    wagered: s.bet,
-  });
-  s.balance = doc?.money ?? s.balance + net;
+  lobbyInfo(t) {
+    return `${BC.DECKS}덱 공유 슈 · ${LEGEND}\n\n${board(getShoe('baccarat', t.channelId))}`;
+  },
 
-  const headline = `${DOT[round.winner]} **${NAME[round.winner]} 승**${round.natural ? ' (내추럴)' : ''}`;
-  const verdict = push ? '🤝 타이 — 베팅 반환' : net > 0 ? '🎉 적중!' : '😵 실패';
-  await i.editReply(
-    payload(s, {
-      table: tableText(round.player, round.banker),
-      line: `${headline}\n${verdict} 순손익 **${netText(net)}**`,
-      color: netColor(net),
-    }),
-  );
-}
+  parseBet(extra) {
+    const [side, amt] = extra.split('.');
+    const amount = Number(amt);
+    return SIDES.includes(side) && BC.BET_OPTIONS.includes(amount) ? { side, amount } : null;
+  },
+
+  betLabel(b) {
+    return `${DOT[b.side]} ${NAME[b.side]} ${chips(b.amount)}`;
+  },
+
+  /** 쪽 × 금액 = 3줄 버튼, 한 번 클릭으로 베팅 */
+  betRows(t) {
+    return SIDES.map((side) =>
+      new ActionRowBuilder().addComponents(
+        BC.BET_OPTIONS.map((amt) =>
+          new ButtonBuilder()
+            .setCustomId(mgr.cid(t, 'bet', `${side}.${amt}`))
+            .setLabel(num(amt))
+            .setEmoji(DOT[side])
+            .setStyle(STYLE[side]),
+        ),
+      ),
+    );
+  },
+
+  playRows() {
+    return []; // 딜 연출 중에는 버튼 없음
+  },
+
+  describe(t, prompt) {
+    const shoe = getShoe('baccarat', t.channelId);
+    const parts = [board(shoe), ''];
+    if (t.state === 'playing' && t.view) {
+      parts.push(tableText(t.view.player, t.view.banker), '', '**이번 판 베팅**');
+      parts.push(...t.roundEntries.map((e) => `🧑 **${e.name}** — ${mgr.betLabel(e)}`));
+    } else {
+      if (t.lastSummary) parts.push('**지난 판**', t.lastSummary, '');
+      parts.push('**이번 판 베팅**', mgr.seatsBetText(t));
+      if (t.note) parts.push('', t.note);
+    }
+    parts.push('', LEGEND, prompt);
+    return parts.join('\n');
+  },
+
+  async playRound(t, entries) {
+    const shoe = getShoe('baccarat', t.channelId);
+    const reshuffled = shoe.prepareRound();
+    const round = bac.playRound(() => shoe.draw()); // 결과 선 연산
+
+    // 카드 한 장씩 공개 연출
+    t.view = { player: [], banker: [] };
+    for (const { side, card } of round.order) {
+      t.view[side].push(card);
+      t.live.push(mgr.render(t, reshuffled ? '🔄 새 슈로 교체 후 딜링 중...' : '🎴 딜링 중...'));
+      await sleep(BC.DEAL_MS);
+    }
+    shoe.history.push(round.winner);
+
+    const lines = await Promise.all(
+      entries.map(async (e) => {
+        const { net, push } = bac.settle(e.side, round.winner, e.amount, BC.PAYOUT);
+        let st;
+        try {
+          st = await wallet.settleRound(e.id, e.roundId, e.amount + net, {
+            game: 'baccarat',
+            guildId: t.guildId,
+            inc: { baccaratRounds: 1, ...(net > 0 ? { baccaratWins: 1 } : {}) },
+            wagered: e.amount,
+            detail: { side: e.side, winner: round.winner, player: round.player, banker: round.banker },
+          });
+        } catch (err) {
+          console.error('[baccarat settle]', err);
+          st = { ok: false, error: true };
+        }
+        const verdict = push ? '🤝' : net > 0 ? '🎉' : '😵';
+        const tail = st.ok ? ` · 잔고 ${chips(st.balance)}` : st.error ? ' · ⚠️ 정산 오류 (자동 환불 예정)' : ' · ⚠️ 이미 처리된 판';
+        return `${verdict} **${e.name}** ${DOT[e.side]} **${netText(net)}**${tail}`;
+      }),
+    );
+
+    const headline = `${DOT[round.winner]} **${NAME[round.winner]} 승**${round.natural ? ' (내추럴)' : ''}`;
+    t.view = null;
+    await mgr.afterRound(t, [tableText(round.player, round.banker), headline, ...lines].join('\n'));
+  },
+
+  onAction() {
+    return undefined;
+  },
+});
 
 module.exports = {
-  prefix: PREFIX,
+  prefix: mgr.prefix,
   data: new SlashCommandBuilder()
     .setName('바카라')
-    .setDescription('8덱 슈 바카라 — 흐름 보드를 직접 판독하고 베팅하세요')
+    .setDescription('채널 공유 8덱 슈 바카라 테이블 — 흐름 보드를 직접 판독하세요')
     .addIntegerOption((o) =>
-      o.setName('금액').setDescription('1회 베팅 금액').setRequired(true).setMinValue(config.MIN_BET).setMaxValue(config.MAX_BET),
+      o.setName('최대인원').setDescription(`테이블 최대 인원, 나 포함 (1~${BC.MAX_PLAYERS}, 기본 1 = 바로 혼자 시작)`).setMinValue(1).setMaxValue(BC.MAX_PLAYERS),
     ),
-
   async execute(i) {
-    const bet = i.options.getInteger('금액', true);
-    const s = sessions.start(i.user.id, 'baccarat', { guildId: i.guildId, bet }, {
-      onTimeout: async (x) => {
-        sessions.end(x);
-        await x.ui.editReply(payload(x, { line: '⏱️ 테이블을 떠났습니다.', disabled: true })).catch(() => {});
-      },
-    });
-    if (!s) return i.reply(ephemeral(busyText));
-    s.ui = i;
-    await i.deferReply();
-    const account = await wallet.getAccount(i.user.id, i.guildId);
-    s.balance = account.money;
-    s.shoe = getShoe('baccarat', i.channelId);
-    if (s.balance < bet) {
-      sessions.end(s);
-      return i.editReply(`잔고가 부족해요. (현재 ${chips(s.balance)})`);
-    }
-    await i.editReply(payload(s));
+    return mgr.open(i, i.options.getInteger('최대인원') ?? 1);
   },
-
-  async handleButton(i, { action }) {
-    const s = sessions.get(i.user.id);
-    if (!s || s.game !== 'baccarat') return expired(i);
-    await i.deferUpdate();
-    s.ui = i;
-    await sessions.run(s, async () => {
-      if (action === 'stop') {
-        sessions.end(s);
-        return i.editReply(payload(s, { line: `👋 종료 — 최종 잔고 ${chips(s.balance)}`, disabled: true }));
-      }
-      if (['player', 'banker', 'tie'].includes(action)) return deal(i, s, action);
-    });
-  },
+  handleButton: (i, ctx) => mgr.handleButton(i, ctx),
+  _mgr: mgr,
 };

@@ -12,7 +12,12 @@ function payload(user, doc) {
   const embed = new EmbedBuilder()
     .setColor(COLOR.gold)
     .setTitle(`💼 ${user.displayName ?? user.username}님의 지갑`)
-    .setDescription(`잔고 **${chips(doc.money)}**`)
+    .setDescription(
+      `잔고 **${chips(doc.money)}**` +
+        (doc.escrow?.length
+          ? `\n🔒 진행 중인 게임에 묶인 칩 **${chips(doc.escrow.reduce((sum, e) => sum + e.amount, 0))}** (${doc.escrow.length}판 — 끝나면 정산, 장애 시 자동 환불)`
+          : ''),
+    )
     .addFields(
       { name: '🃏 블랙잭', value: `${num(st.blackjackWins ?? 0)}승 / ${num(st.blackjackHands ?? 0)}판 (${rate(st.blackjackWins, st.blackjackHands)})`, inline: true },
       { name: '🎰 슬롯', value: `${num(st.slotSpins ?? 0)}회 · 최고 ${num(st.slotBestWin ?? 0)}`, inline: true },
