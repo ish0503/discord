@@ -1,0 +1,21 @@
+{
+  "name": "discord-casino-bot",
+  "version": "1.0.0",
+  "description": "디스코드 인터랙티브 가상 카지노 봇 (discord.js v14 + MongoDB)",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "mongoose": "^8.8.0"
+  },
+  "license": "MIT"
+}
