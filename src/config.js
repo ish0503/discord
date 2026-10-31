@@ -1,0 +1,81 @@
+/**
+ * 게임 밸런스 & 시스템 상수 모음.
+ * 수치를 바꿀 때는 `npm test`로 RTP(환수율) 검증 테스트를 함께 돌려 보세요.
+ *
+ * PAYOUT 값은 모두 "원금 포함 총 지급 배수"입니다. (2 = 1:1 배당)
+ */
+module.exports = {
+  START_MONEY: 10_000,
+  MIN_BET: 100,
+  MAX_BET: 1_000_000,
+  SESSION_IDLE_MS: 60_000, // 버튼 무반응 시 자동 처리까지의 시간
+  SESSION_HARD_LIMIT_MS: 14 * 60_000, // 인터랙션 토큰(15분) 만료 전 강제 종료
+
+  BAILOUT: {
+    AMOUNT: 5_000,
+    THRESHOLD: 1_000, // 잔고가 이 값 미만일 때만 신청 가능
+    COOLDOWN_MS: 24 * 60 * 60 * 1000,
+  },
+
+  BLACKJACK: {
+    DECKS: 6, // 312장
+    RESHUFFLE_AT: 60, // 남은 카드가 이 값 이하이면 다음 판 시작 전에 재셔플
+    BET_OPTIONS: [1_000, 5_000, 10_000, 50_000],
+    BLACKJACK_PAYS: 1.5, // 3:2
+    DEALER_HITS_SOFT_17: false, // false = S17 (소프트 17 스탠드)
+    DEALER_STEP_MS: 700,
+  },
+
+  SLOT: {
+    REEL_DELAY_MS: 400,
+    // 사양서: 🍒40 🍋30 💎8 7️⃣2 = 80% → 나머지 20%를 🔔로 채움
+    SYMBOLS: [
+      { emoji: '🍒', weight: 40 },
+      { emoji: '🍋', weight: 30 },
+      { emoji: '🔔', weight: 20 },
+      { emoji: '💎', weight: 8 },
+      { emoji: '7️⃣', weight: 2 },
+    ],
+    PAYTABLE: {
+      triple: { '🍒': 3, '🍋': 8, '🔔': 15, '💎': 100, '7️⃣': 777 },
+      twoCherry: 1.25, // 아무 위치든 🍒 정확히 2개
+    }, // 이론 RTP ≈ 94.5%
+  },
+
+  CRASH: {
+    HOUSE_EDGE: 0.03,
+    GROWTH_PER_MS: 0.0001, // m(t) = e^(k·t) → 2배 ≈ 6.9초, 10배 ≈ 23초
+    TICK_MS: 200, // 화면 갱신 시도 주기 (실제 편집은 in-flight 가드로 자동 스로틀링)
+    MAX_MULTIPLIER: 1000,
+    GRAPH_POINTS: 24,
+    GRAPH_HEIGHT: 6,
+  },
+
+  DICE: {
+    PAYOUT: { lo: 2, seven: 5, hi: 2 }, // 이론 RTP: Hi/Lo 83.3%, 7 83.3%
+    FRAME_MS: 300,
+    ROLL_FRAMES: 2,
+    ASSIST: {
+      ENABLED: true,
+      STREAK: 4, // 이 횟수 이상 연패 중일 때
+      REROLL_CHANCE: 0.15, // 패배 결과를 1회 재굴림할 확률 (승률 약 +3.6%p)
+      SHOW_TO_USER: false, // true면 보정 발동 시 화면에 표시
+    },
+  },
+
+  POKER: {
+    MAX_EXPOSURE: 9, // 앤티 대비 최대 손실 배수 (앤티1 + 플롭2 + 턴2 + 리버4)
+    SIMULATIONS: 400, // 딜러 AI 몬테카를로 반복 횟수
+    REVEAL_ON_FOLD: true, // 다이 후에도 딜러 패·블러핑 여부 공개 (판독 학습용)
+    DEALER_SHOWS_ONE: false, // true면 딜러 핸드 1장을 공개하는 변형 룰
+    IDLE_MS: 90_000,
+  },
+
+  BACCARAT: {
+    DECKS: 8,
+    RESHUFFLE_AT: 52,
+    PAYOUT: { player: 2, banker: 1.95, tie: 9 }, // 뱅커 5% 커미션, 타이 8:1
+    HISTORY_SIZE: 5,
+    DEAL_MS: 500,
+  },
+};
