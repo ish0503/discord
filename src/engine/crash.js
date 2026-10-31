@@ -29,3 +29,13 @@ function speedAt(m, k) {
 }
 
 module.exports = { generateCrashPoint, multiplierAt, timeToReach, speedAt };
+
+/**
+ * 자동 캐시아웃 판정 정책: 목표 배수 ≤ 폭발 배수이면 정확히 목표 배수로 성공.
+ * (같은 배수에서 폭발과 겹치면 캐시아웃 우선) → P(성공) = 0.97 / 목표 → 기대값 0.97 유지
+ */
+function autoCashoutWins(crashPoint, target) {
+  return target <= crashPoint;
+}
+
+module.exports.autoCashoutWins = autoCashoutWins;
