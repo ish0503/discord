@@ -32,6 +32,27 @@ function validAmount(n) {
   return Number.isSafeInteger(n) && n > 0 && n <= config.ADMIN.MAX_ADJUST;
 }
 
+/** 공개 공지 (채널 전체에 보이는 메시지) */
+const announce = (title, description, color = COLOR.info, mentions = []) => ({
+  announce: new EmbedBuilder().setColor(color).setTitle(title).setDescription(description).setTimestamp(new Date()),
+  mentions,
+});
+/** 공개 모드에서도 실패 안내는 실행자에게만 */
+const fail = (text) => ({ fail: text });
+
+/**
+ * 공개 메시지로 보낼 하위 명령어 (모두가 알아야 하는 운영 소식).
+ * 값이 함수면 상황에 따라 판단 — 예: 지급/회수는 [공개] 옵션을 켰을 때만.
+ */
+const PUBLIC = {
+  이벤트: () => true,
+  이벤트종료: async (i) => (await events.active(i.guildId)).length > 0,
+  시즌종료: () => true,
+  점검: () => true,
+  지급: (i) => i.options.getBoolean('공개') === true,
+  회수: (i) => i.options.getBoolean('공개') === true,
+};
+
 const handlers = {
   async 대시보드(i) {
     const o = await stats.overview(i.guildId, i.options.getString('기간') ?? '7d');
@@ -92,6 +113,7 @@ const handlers = {
     const before = (await wallet.getAccount(u.id, i.guildId)).money;
     const doc = await wallet.grant({ userId: u.id, guildId: i.guildId, amount, type: 'admin_grant', reason, actorId: i.user.id });
     await audit(i, 'wallet.grant', { targetId: u.id, amount, reason, before, after: doc.money });
+    if (i.options.getBoolean('공개')) return announce('🎁 관리자 지급', `<@${u.id}> 님에게 **${chips(amount)}** 지급!\n📝 사유: ${reason}`, COLOR.win, [u.id]);
     return `✅ <@${u.id}> 에게 ${chips(amount)} 지급 (${num(before)} → ${num(doc.money)}) · 사유: ${reason}`;
   },
 
@@ -102,8 +124,9 @@ const handlers = {
     if (!validAmount(amount)) return `금액은 1 ~ ${num(config.ADMIN.MAX_ADJUST)} 사이여야 해요.`;
     const before = (await wallet.getAccount(u.id, i.guildId)).money;
     const doc = await wallet.debit({ userId: u.id, guildId: i.guildId, amount, type: 'admin_revoke', reason, actorId: i.user.id });
-    if (!doc) return `❌ 잔고(${num(before)})보다 많이 회수할 수 없어요. (게임에 묶인 칩은 회수 대상이 아님)`;
+    if (!doc) return fail(`❌ 잔고(${num(before)})보다 많이 회수할 수 없어요. (게임에 묶인 칩은 회수 대상이 아님)`);
     await audit(i, 'wallet.revoke', { targetId: u.id, amount, reason, before, after: doc.money });
+    if (i.options.getBoolean('공개')) return announce('⚖️ 관리자 회수', `<@${u.id}> 님에게서 **${chips(amount)}** 회수\n📝 사유: ${reason}`, COLOR.lose, [u.id]);
     return `✅ <@${u.id}> 에게서 ${chips(amount)} 회수 (${num(before)} → ${num(doc.money)}) · 사유: ${reason}`;
   },
 
@@ -136,7 +159,9 @@ const handlers = {
     const message = i.options.getString('메시지') ?? '';
     await guildConfig.update(i.guildId, { $set: { maintenance: { on, message } } });
     await audit(i, 'config.maintenance', { after: { on, message } });
-    return on ? `🛠️ 점검 모드 켜짐 — 새 게임 시작이 막힙니다. (진행 중 게임은 계속)${message ? `\n안내: ${message}` : ''}` : '✅ 점검 모드 해제';
+    return on
+      ? announce('🛠️ 카지노 점검 중', `지금부터 **새 게임 시작이 잠시 막힙니다.**\n진행 중인 게임은 끝까지 정상 진행·정산돼요.${message ? `\n\n📢 ${message}` : ''}`, COLOR.push)
+      : announce('✅ 점검 종료', '카지노가 다시 열렸습니다! 모든 게임을 이용할 수 있어요.', COLOR.win);
   },
 
   async 감사로그(i) {
@@ -165,7 +190,14 @@ const handlers = {
     const r = await seasons.end(i.guildId, { channelId: i.channelId });
     if (!r) return '이미 종료 처리된 시즌이에요.';
     await audit(i, 'season.end', { after: { number: r.closed.number, top: r.closed.results.slice(0, 3) } });
-    return `🏁 시즌 ${r.closed.number} 종료!\n${r.closed.results.slice(0, 5).map((x) => `${x.rank}위 <@${x.userId}> ${netText(x.net)} (${num(x.games)}판)`).join('\n') || '참가자 없음'}\n➡️ 시즌 ${r.next.number} 시작`;
+    const top = r.closed.results.slice(0, 5);
+    const medal = (k) => ['🥇', '🥈', '🥉'][k] ?? `\`${k + 1}위\``;
+    return announce(
+      `🏁 시즌 ${r.closed.number} 종료!`,
+      [top.map((x, k) => `${medal(k)} <@${x.userId}> ${netText(x.net)} (${num(x.games)}판)`).join('\n') || '참가자 없음', '', `➡️ **시즌 ${r.next.number}** 시작! 모두 새 출발선에서 다시 겨뤄요.`].join('\n'),
+      COLOR.gold,
+      top.slice(0, 3).map((x) => x.userId),
+    );
   },
 
   async 이벤트(i) {
@@ -174,13 +206,15 @@ const handlers = {
     const hours = i.options.getInteger('시간', true);
     const e = await events.create({ guildId: i.guildId, name, multiplier, hours, createdBy: i.user.id });
     await audit(i, 'event.create', { after: { name, multiplier, hours } });
-    return `🎉 이벤트 **${name}** 시작 — 보상 포인트 ×${multiplier}, <t:${Math.floor(e.endsAt.getTime() / 1000)}:R> 종료 (게임 확률·배당에는 영향 없음)`;
+    const end = Math.floor(e.endsAt.getTime() / 1000);
+    return announce(`🎉 이벤트 시작: ${name}`, [`⭐ 보상 포인트 **×${multiplier}**`, `⏰ <t:${end}:f> 까지 (<t:${end}:R> 종료)`, '', '업적·미션 포인트가 배수로 지급돼요. (게임 확률·배당은 그대로)'].join('\n'), COLOR.gold);
   },
 
   async 이벤트종료(i) {
     const n = await events.endAll(i.guildId);
+    if (!n) return '진행 중인 이벤트가 없어요.';
     await audit(i, 'event.endAll', { amount: n });
-    return `진행 중 이벤트 ${n}개 종료`;
+    return announce('🔚 이벤트 종료', `진행 중이던 이벤트 ${n}개가 종료되었습니다. 참여해 주셔서 감사합니다!`, COLOR.push);
   },
 
   async 관리자역할(i) {
@@ -202,13 +236,15 @@ const data = new SlashCommandBuilder()
     s.setName('지급').setDescription('칩 지급 (감사 로그 기록)')
       .addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true))
       .addIntegerOption((o) => o.setName('금액').setDescription('금액').setRequired(true).setMinValue(1).setMaxValue(config.ADMIN.MAX_ADJUST))
-      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
+      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200))
+      .addBooleanOption((o) => o.setName('공개').setDescription('채널에 공개 공지로 알리기 (기본: 나만 보기)')),
   )
   .addSubcommand((s) =>
     s.setName('회수').setDescription('칩 회수 (감사 로그 기록)')
       .addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true))
       .addIntegerOption((o) => o.setName('금액').setDescription('금액').setRequired(true).setMinValue(1).setMaxValue(config.ADMIN.MAX_ADJUST))
-      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
+      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200))
+      .addBooleanOption((o) => o.setName('공개').setDescription('채널에 공개 공지로 알리기 (기본: 나만 보기)')),
   )
   .addSubcommand((s) =>
     s.setName('게임').setDescription('게임 활성/비활성·베팅 한도')
@@ -234,8 +270,22 @@ module.exports = {
   data,
   async execute(i) {
     if (!(await guildConfig.isAdmin(i))) return i.reply(ephemeral('🔒 관리자만 사용할 수 있어요.'));
-    await i.deferReply({ ephemeral: true });
-    const out = await handlers[i.options.getSubcommand()](i);
+    const sub = i.options.getSubcommand();
+    const isPublic = !!(await PUBLIC[sub]?.(i));
+    await i.deferReply(isPublic ? {} : { ephemeral: true });
+    const out = await handlers[sub](i);
+    if (out?.fail) {
+      // 공개로 열었는데 실패 → 공개 응답을 지우고 실행자에게만 안내
+      if (isPublic) {
+        await i.deleteReply?.().catch(() => {});
+        return i.followUp(ephemeral(out.fail));
+      }
+      return i.editReply({ content: out.fail, allowedMentions: { parse: [] } });
+    }
+    if (out?.announce) {
+      if (isPublic) return i.editReply({ embeds: [out.announce.setFooter({ text: `관리자 ${i.member?.displayName ?? i.user.username}` })], allowedMentions: { users: out.mentions } });
+      return i.editReply({ embeds: [out.announce], allowedMentions: { parse: [] } });
+    }
     return i.editReply(typeof out === 'string' ? { content: out, allowedMentions: { parse: [] } } : { embeds: [out] });
   },
 };

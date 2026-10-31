@@ -78,13 +78,9 @@ async function start(l, { buyin, bots, maxHumans, sb, bb }) {
     title: (r) => `🎭 포커페이스 · 블라인드 ${num(sb)}/${num(bb)} · ${r.hand?.streetName ?? ''}`,
     footer: () => `바이인 ${num(buyin)} · 노리밋 · 🔘 버튼 · 시간 초과 시 체크/다이`,
     onHandEnd: (r, h) => finish(r, h, { l, buyin, bots, maxHumans }),
+    // 화면 편집은 로비 메시지 편집기(l.live)를 그대로 사용 → 공개 메시지에 응답한 최신 버튼 토큰만 l.ui에 반영
+    onInteraction: (i) => (l.ui = i),
   });
-  // 화면 편집은 로비 메시지 편집기(l.live)를 그대로 사용 → 최신 버튼 토큰을 l.ui에 반영
-  const orig = room.handleAction.bind(room);
-  room.handleAction = (i, action, extra) => {
-    if (!['hand', 'back'].includes(action)) l.ui = i;
-    return orig(i, action, extra);
-  };
   await room.playHand({ sb, bb, button: randomInt(0, seats.length) });
 }
 

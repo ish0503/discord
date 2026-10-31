@@ -5,8 +5,14 @@
  *  - 상금 풀 = 사람 참가비 합 × (1 − RAKE). 봇은 참가비를 내지 않고 상금도 받지 않음
  *    → 상금은 "사람 참가자들 사이의 순위"로 분배 (사전 공개)
  *  - 두 번 연속 시간 초과한 사람은 자리비움(자동 체크/다이) → [복귀] 버튼으로 돌아옴
+ *
+ * 진행 무대 (스레드):
+ *  - 시작되면 모집 메시지에서 전용 스레드를 만들어 그 안에서 진행 → 원래 채널은 다른 게임을 계속 할 수 있음
+ *  - 원래 채널의 모집 메시지는 "🏆 토너먼트 진행 중" 현황판(레벨·생존자·칩 순위·스레드 링크)으로 바뀜
+ *  - 핸드마다 스레드에 새 테이블 메시지를 올리고, 끝난 핸드는 그 메시지가 공개 결과 기록으로 남음
+ *  - 스레드를 만들 수 없으면(권한 없음·이미 스레드 안) 같은 채널에 새 메시지로 진행
  */
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
 const wallet = require('../services/wallet');
 const settlement = require('../services/settlement');
@@ -16,7 +22,8 @@ const lobby = require('../services/lobby');
 const Tournament = require('../db/Tournament');
 const { PokerRoom, makeBots, route } = require('../services/pokerRoom');
 const { randomInt, shuffle } = require('../utils/rng');
-const { chips, num, netText, sleep, ephemeral } = require('../utils/format');
+const { LiveMessage } = require('../utils/liveMessage');
+const { COLOR, chips, num, netText, sleep, ephemeral } = require('../utils/format');
 
 const TN = config.TOURNAMENT;
 const PREFIX = 'tn';
@@ -84,7 +91,8 @@ async function start(l, { fee, bots, maxHumans, stack }) {
   await Tournament.create({ tournamentId: l.id, guildId: l.guildId, economyKey: wallet.economyKey(l.guildId), channelId: l.channelId, fee, rake: TN.RAKE, prizePool: pool, startStack: stack, entrants: seats.map((s) => ({ id: s.id, name: s.name, type: s.type })) }).catch(console.error);
   gameState.create({ gameId: l.id, game: 'tournament', guildId: l.guildId, channelId: l.channelId, messageId: l.message?.id, players: humans.map((h) => h.id), state: 'PLAYING' });
 
-  const T = { l, fee, pool, stack, bots, maxHumans, level: 0, finish: [], button: randomInt(0, seats.length), humans: humans.length };
+  const T = { l, fee, pool, stack, bots, maxHumans, level: 0, finish: [], button: randomInt(0, seats.length), humans: humans.length, startedAt: Date.now() };
+  T.stage = await openStage(l, { fee, seats, pool });
   const room = new PokerRoom({
     id: l.id,
     prefix: PREFIX,
@@ -104,15 +112,97 @@ async function start(l, { fee, bots, maxHumans, stack }) {
     },
     footer: () => `상금 풀 ${num(pool)} · 탈락 ${T.finish.length}명 · ${TN.HANDS_PER_LEVEL}핸드마다 블라인드 ×${TN.BLIND_GROWTH}`,
     onHandEnd: (r, h) => afterHand(r, h, T),
+    // 스레드 모드에서는 테이블 메시지를 봇 토큰으로 직접 편집하므로 인터랙션 토큰이 필요 없음
+    onInteraction: (i) => {
+      if (!T.stage) l.ui = i;
+    },
   });
-  const orig = room.handleAction.bind(room);
-  room.handleAction = (i, action, extra) => {
-    if (!['hand', 'back'].includes(action)) l.ui = i;
-    return orig(i, action, extra);
-  };
   T.room = room;
   const { sb, bb } = levelBlinds(0);
+  await newHandMessage(room, T);
+  pushStatus(T);
   await room.playHand({ sb, bb, button: T.button });
+}
+
+// ───────────────────────── 진행 무대 (스레드 / 채널 현황판) ─────────────────────────
+
+/** 모집 메시지에서 전용 스레드를 연다. 실패하면 같은 채널, 그것도 안 되면 null(모집 메시지 하나로 진행) */
+async function openStage(l, { fee, seats, pool }) {
+  const base = l.message;
+  const inThread = base?.channel?.isThread?.() ?? false;
+  let thread = null;
+  if (base?.startThread && !inThread) {
+    thread = await base
+      .startThread({ name: `🏆 토너먼트 · 참가비 ${num(fee)} · ${seats.length}인`.slice(0, 100), autoArchiveDuration: 1440, reason: '카지노 토너먼트 진행' })
+      .catch((err) => (console.warn('[tournament] 스레드 생성 실패 → 채널에서 진행:', err.message), null));
+  }
+  const target = thread ?? base?.channel ?? null;
+  if (!target?.send) return null;
+  const humans = seats.filter((s) => s.type === 'human');
+  const intro = new EmbedBuilder()
+    .setColor(COLOR.gold)
+    .setTitle('🏆 토너먼트 시작!')
+    .setDescription(
+      [
+        `참가자 ${humans.map((h) => `<@${h.id}>`).join(' ')}${seats.length > humans.length ? ` + 🤖 봇 ${seats.length - humans.length}명` : ''}`,
+        `💰 상금 풀 **${chips(pool)}** · 시작 칩 ${num(seats[0]?.stack ?? 0)} · ${TN.HANDS_PER_LEVEL}핸드마다 블라인드 ×${TN.BLIND_GROWTH}`,
+        '',
+        '🃏 **내 패**는 테이블의 [내 패] 버튼으로 언제든 확인할 수 있어요 (나에게만 보임).',
+        '📜 핸드가 끝날 때마다 결과가 이 스레드에 공개로 남습니다.',
+        thread ? '💬 원래 채널에서는 다른 게임을 계속 즐길 수 있어요.' : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+  await target.send({ embeds: [intro], allowedMentions: { users: humans.map((h) => h.id) } }).catch((err) => console.warn('[tournament] 시작 안내 실패:', err.message));
+  return { thread, target };
+}
+
+const liveFor = (msg) => new LiveMessage((p) => msg.edit(p));
+
+/** 다음 핸드용 테이블 메시지를 무대 맨 아래에 새로 올린다 (지난 핸드 메시지는 결과 기록으로 남음) */
+async function newHandMessage(room, T) {
+  if (!T.stage) return;
+  const msg = await T.stage.target
+    .send({ embeds: [new EmbedBuilder().setColor(COLOR.table).setTitle(`🂠 핸드 #${room.handNo + 1} 딜링 중...`)] })
+    .catch((err) => (console.warn('[tournament] 테이블 메시지 실패:', err.message), null));
+  if (msg) {
+    room.live = liveFor(msg);
+    return;
+  }
+  // 무대에 글을 못 쓰면 모집 메시지 하나로 진행하는 기존 방식으로 전환
+  T.stage = null;
+  T.l.live.closed = false;
+  room.live = T.l.live;
+}
+
+/** 원래 채널의 모집 메시지 = 진행 현황판 */
+function statusPayload(T, { final = false, lines = [], rows = [] } = {}) {
+  const room = T.room;
+  const { sb, bb } = levelBlinds(T.level);
+  const alive = room ? room.seats.filter((s) => s.stack > 0).sort((a, b) => b.stack - a.stack) : [];
+  const where = T.stage?.thread ? `📍 진행 스레드: <#${T.stage.thread.id}>` : T.stage ? '📍 아래 메시지에서 진행 중' : '';
+  const desc = final
+    ? [where, ...lines]
+    : [
+        where,
+        `⏱️ <t:${Math.floor(T.startedAt / 1000)}:R> 시작 · 레벨 **${T.level + 1}** (블라인드 ${num(sb)}/${num(bb)}) · 핸드 **#${room?.handNo ?? 0}**/${TN.MAX_HANDS}`,
+        `💰 상금 풀 **${chips(T.pool)}** · 생존 **${alive.length}명** · 탈락 ${T.finish.length}명`,
+        '',
+        '**📊 칩 순위**',
+        ...alive.slice(0, 8).map((s, k) => `${MEDAL[k] ?? `\`${k + 1}\``} ${s.type === 'bot' ? '🤖' : '🧑'} ${s.name} — ${num(s.stack)}`),
+        ...(T.finish.length ? ['', `💀 탈락: ${[...T.finish].sort((a, b) => a.place - b.place).map((f) => `${f.name}(${f.place}위)`).join(', ')}`] : []),
+      ];
+  const embed = new EmbedBuilder()
+    .setColor(final ? COLOR.gold : COLOR.lose)
+    .setTitle(final ? '🏁 토너먼트 종료' : '🔴 LIVE · 🏆 토너먼트 진행 중')
+    .setDescription(desc.filter((x) => x !== '').join('\n').slice(0, 4096))
+    .setFooter({ text: final ? `총 ${room?.handNo ?? 0}핸드` : '관전은 스레드에서 · 이 채널에서는 다른 게임을 계속할 수 있어요' });
+  return { embeds: [embed], components: rows };
+}
+
+function pushStatus(T) {
+  if (T.stage) T.l.live.push(statusPayload(T));
 }
 
 function nextButton(room, from) {
@@ -146,10 +236,17 @@ async function afterHand(room, h, T) {
   if (room.handNo % TN.HANDS_PER_LEVEL === 0) T.level += 1;
   const { sb, bb } = levelBlinds(T.level);
   const levelUp = room.handNo % TN.HANDS_PER_LEVEL === 0 ? [`⏫ 블라인드 상승 → **${sb}/${bb}**`] : [];
-  room.live.push(room.render(`⏳ 다음 핸드 준비 중...`, { final: true, extraLines: [summary, ...bustLines, ...levelUp] }));
+  if (T.stage) {
+    // 끝난 핸드의 메시지는 공개 결과 기록으로 고정하고, 다음 핸드는 새 메시지에서
+    await room.live.final(room.render(`✅ 핸드 #${room.handNo} 종료`, { final: true, extraLines: [summary, ...bustLines, ...levelUp] })).catch(console.error);
+    pushStatus(T);
+  } else {
+    room.live.push(room.render(`⏳ 다음 핸드 준비 중...`, { final: true, extraLines: [summary, ...bustLines, ...levelUp] }));
+  }
   await sleep(TN.HAND_PAUSE_MS);
   if (room.state !== 'playing') return undefined;
   T.button = nextButton(room, T.button);
+  await newHandMessage(room, T);
   return room.playHand({ sb, bb, button: T.button });
 }
 
@@ -197,7 +294,24 @@ async function finishTournament(room, T, reason, lines) {
     new ButtonBuilder().setCustomId(`${PREFIX}:${T.l.hostId}:again:${T.fee}.${T.bots}.${T.maxHumans}.${T.stack}`).setLabel('같은 설정으로 새 토너먼트 (호스트)').setEmoji('🔁').setStyle(ButtonStyle.Primary),
   );
   const head = reason === 'max-hands' ? `⏱️ 최대 ${TN.MAX_HANDS}핸드 도달 — 칩 순위로 종료` : '🏁 토너먼트 종료!';
-  await room.live.final(room.render(head, { final: true, extraRows: [again], extraLines: [...lines, '', '**🏆 최종 순위**', ...standings, `상금 풀 ${chips(T.pool)}`] })).catch(console.error);
+  if (!T.stage) {
+    await room.live.final(room.render(head, { final: true, extraRows: [again], extraLines: [...lines, '', '**🏆 최종 순위**', ...standings, `상금 풀 ${chips(T.pool)}`] })).catch(console.error);
+    return;
+  }
+  // 1) 마지막 핸드 결과 고정  2) 스레드에 최종 순위 공개  3) 채널 현황판을 결과로  4) 스레드 보관
+  await room.live.final(room.render(`✅ 핸드 #${room.handNo} 종료`, { final: true, extraLines: lines })).catch(console.error);
+  const winner = T.finish[0];
+  const result = new EmbedBuilder()
+    .setColor(COLOR.gold)
+    .setTitle(head)
+    .setDescription([`👑 우승 **${winner?.name ?? '-'}**${winner?.type === 'human' ? ` (<@${winner.id}>)` : ''}`, '', '**🏆 최종 순위**', ...standings, '', `상금 풀 ${chips(T.pool)} · 총 ${room.handNo}핸드`].join('\n').slice(0, 4096));
+  const humanIds = T.finish.filter((f) => f.type === 'human').map((f) => f.id);
+  await T.stage.target.send({ embeds: [result], allowedMentions: { users: humanIds } }).catch(console.error);
+  await T.l.live.final(statusPayload(T, { final: true, lines: [`👑 우승 **${winner?.name ?? '-'}**`, '', ...standings, '', `상금 풀 ${chips(T.pool)}`], rows: [again] })).catch(console.error);
+  if (T.stage.thread?.setArchived) {
+    const t = setTimeout(() => T.stage.thread.setArchived(true, '토너먼트 종료').catch(() => {}), TN.ARCHIVE_AFTER_MS);
+    t.unref?.();
+  }
 }
 
 module.exports = {

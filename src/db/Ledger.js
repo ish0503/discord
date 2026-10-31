@@ -5,7 +5,7 @@ const ledgerSchema = new Schema({
   economyKey: { type: String, required: true },
   guildId: String,
   userId: { type: String, required: true },
-  type: { type: String, required: true }, // daily | bailout | admin_grant | admin_revoke | shop | season_reward
+  type: { type: String, required: true }, // daily | bailout | admin_grant | admin_revoke | shop | season_reward | transfer_out | transfer_in | transfer_refund
   amount: { type: Number, required: true }, // +발행 / −회수
   reason: String,
   actorId: String,

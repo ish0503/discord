@@ -5,6 +5,7 @@ const cosmetics = require('../content/cosmetics');
 const { COLOR, ephemeral } = require('../utils/format');
 
 const PREFIX = 'iv';
+const PREVIEW = [{ rank: 'A', suit: '♠' }, { rank: 'K', suit: '♥' }, { rank: '10', suit: '♦' }, { rank: 'Q', suit: '♣' }];
 
 async function render(userId) {
   const p = await profile.get(userId);
@@ -25,12 +26,13 @@ async function render(userId) {
     .setDescription(
       [
         `🏷️ 칭호: **${eq.title ?? '없음'}**`,
-        `🃏 카드: **${show('cardTheme')}** — 예시 ${cosmetics.card({ rank: 'A', suit: '♠' }, eq.cardTheme)} ${cosmetics.card({ rank: 'K', suit: '♥' }, eq.cardTheme)}`,
+        `🃏 카드: **${show('cardTheme')}** — 예시 ${PREVIEW.map((c) => cosmetics.cardMarkup(c, eq.cardTheme)).join(' ')}\n　└ ${cosmetics.cardTheme(eq.cardTheme).desc}`,
         `🎰 슬롯: **${show('slotTheme')}** — ${['🍒', '💎', '7️⃣'].map((e) => cosmetics.slotSymbol(e, eq.slotTheme)).join(' ')}`,
         `🎲 주사위: **${show('diceSkin')}** — ${cosmetics.diceFace(1, eq.diceSkin)} ${cosmetics.diceFace(6, eq.diceSkin)}`,
         `🎨 색상: **${show('color')}** · 🖼️ 테두리: **${show('frame')}** — ${cosmetics.framed('미리보기', eq.frame)}`,
         '',
         `보유 칭호 ${p.titles.length}개 · 보유 아이템 ${p.inventory.length}개`,
+        '🖼️ 색상·테두리·카드 테마는 `/프로필` 이미지 카드에 그대로 반영돼요.',
       ].join('\n'),
     );
   return {

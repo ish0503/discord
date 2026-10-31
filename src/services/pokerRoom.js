@@ -35,7 +35,8 @@ function makeBots(n, names, stack) {
 class PokerRoom {
   /**
    * @param o { id, prefix, guildId, channelId, title(room)→string, seats, live, ui, message,
-   *            turnMs, thinkMs, simulations, streetPauseMs, revealFoldedBots, autoSitOut, footer(room)→string, onHandEnd }
+   *            turnMs, thinkMs, simulations, streetPauseMs, revealFoldedBots, autoSitOut, footer(room)→string, onHandEnd,
+   *            onInteraction(i) — 공개 메시지에 deferUpdate된 버튼 인터랙션 (화면 편집 토큰 갱신용) }
    */
   constructor(o) {
     Object.assign(this, o);
@@ -170,7 +171,10 @@ class PokerRoom {
     if (Number(handNo) !== this.handNo) return i.reply(ephemeral('지난 핸드의 버튼이에요.'));
     if (this.busy) return i.deferUpdate();
     await i.deferUpdate();
+    // 공개 테이블 메시지에 대한 deferUpdate가 끝난 인터랙션만 화면 편집 토큰으로 쓴다.
+    // (거절 응답·'내 패' 같은 비공개(ephemeral) 응답의 토큰을 쓰면 테이블 전체가 "나만 보기"로 바뀌는 버그)
     this.ui = i;
+    this.onInteraction?.(i);
     seat.timeouts = 0;
     await runExclusive(this, async () => {
       if (this.hand !== h || h.actor !== idx) return;

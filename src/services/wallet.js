@@ -198,6 +198,34 @@ async function debit({ userId, guildId, amount, type, reason, actorId }) {
   return doc;
 }
 
+/**
+ * 유저 간 송금. 보낸 사람에게서 (금액 + 수수료)를 회수하고 받는 사람에게 금액을 발행한다.
+ * 수수료는 경제에서 소각 (부계정으로 칩을 몰아주는 행위 억제). 받는 쪽 발행이 실패하면 보낸 사람에게 되돌림.
+ * @returns { ok, fee, from, to } | { ok:false, reason }
+ */
+async function transfer({ fromId, toId, guildId, amount, fee = 0, memo = '' }) {
+  assertAmount(amount);
+  const total = amount + fee;
+  await getAccount(fromId, guildId);
+  await getAccount(toId, guildId);
+  const from = await debit({ userId: fromId, guildId, amount: total, type: 'transfer_out', reason: `→ ${toId}${memo ? ` · ${memo}` : ''}`, actorId: fromId });
+  if (!from) return { ok: false, reason: 'balance' };
+  try {
+    const to = await grant({ userId: toId, guildId, amount, type: 'transfer_in', reason: `← ${fromId}${memo ? ` · ${memo}` : ''}`, actorId: fromId });
+    return { ok: true, fee, from, to };
+  } catch (err) {
+    await grant({ userId: fromId, guildId, amount: total, type: 'transfer_refund', reason: `송금 실패 환불: ${err.message}`, actorId: fromId }).catch(console.error);
+    return { ok: false, reason: 'error' };
+  }
+}
+
+/** 오늘(서비스 시간대 기준) 보낸 송금 총액 (수수료 포함) */
+async function transferredToday(userId, guildId, dayKeyOf, today) {
+  const since = new Date(Date.now() - 36 * 3600_000);
+  const rows = await Ledger.find({ economyKey: economyKey(guildId), userId, type: 'transfer_out', createdAt: { $gte: since } }).lean();
+  return rows.filter((r) => dayKeyOf(new Date(r.createdAt)) === today).reduce((sum, r) => sum - r.amount, 0);
+}
+
 async function claimBailout(userId, guildId) {
   const { AMOUNT, THRESHOLD, COOLDOWN_MS } = config.BAILOUT;
   const now = new Date();
@@ -251,6 +279,8 @@ module.exports = {
   recoverGame,
   grant,
   debit,
+  transfer,
+  transferredToday,
   claimBailout,
   claimDaily,
 };

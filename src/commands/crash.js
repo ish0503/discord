@@ -4,6 +4,7 @@
  * 정산 정책 (공개):
  *  - 수동 캐시아웃: 봇 서버가 버튼 이벤트를 받은 시각의 배수로 정산 (화면 갱신 지연과 무관)
  *  - 자동 캐시아웃: 목표 배수 ≤ 폭발 배수이면 정확히 목표 배수로 정산 (같은 배수면 캐시아웃 우선)
+ *  - 배수는 0.80x에서 출발: 1.00x(본전) 전에 탈출하면 원금 일부만 돌려받음
  *  - 서버 재시작: 자동 캐시아웃 판은 시작 시점에 결과가 확정·선기록되어 그대로 정산,
  *               수동 판은 결과 미확정이므로 베팅 전액 환불
  */
@@ -20,19 +21,21 @@ const { COLOR, chips, num, netText, ephemeral, busyText } = require('../utils/fo
 
 const CR = config.CRASH;
 const K = CR.GROWTH_PER_MS;
+const START = CR.START_MULTIPLIER ?? 1;
 const PREFIX = 'cr';
 const cid = (uid, action) => `${PREFIX}:${uid}:${action}:`;
 
 function graph(history, height = CR.GRAPH_HEIGHT) {
   const top = Math.max(2, ...history);
-  const lt = Math.log(top);
-  const levels = history.map((v) => Math.round((Math.log(v) / lt) * height));
+  const lt = Math.log(top / START);
+  const levels = history.map((v) => Math.round((Math.log(Math.max(v, START) / START) / lt) * height));
+  const even = Math.round((Math.log(1 / START) / lt) * height); // 본전(1.00x) 높이
   const rows = [];
   for (let r = height; r >= 1; r--) {
-    const label = r === height ? `${top.toFixed(2)}x`.padStart(7) : ' '.repeat(7);
-    rows.push(`${label} ┤${levels.map((l) => (l >= r ? '█' : ' ')).join('')}`);
+    const label = r === height ? `${top.toFixed(2)}x` : r === even ? '1.00x' : '';
+    rows.push(`${label.padStart(7)} ┤${levels.map((l) => (l >= r ? (r <= even ? '▒' : '█') : r === even ? '┄' : ' ')).join('')}`);
   }
-  rows.push(`${'1.00x'.padStart(7)} └${'─'.repeat(Math.max(history.length, 1))}`);
+  rows.push(`${`${START.toFixed(2)}x`.padStart(7)} └${'─'.repeat(Math.max(history.length, 1))}`);
   return '```\n' + rows.join('\n') + '\n```';
 }
 
@@ -49,7 +52,7 @@ function payload(s, { state, m, net = 0 }) {
   if (state === 'running') {
     lines.push(`**🚀 ${m.toFixed(2)}x**`);
     lines.push(`⏱️ ${elapsed}s · 상승 속도 **+${crash.speedAt(m, K).toFixed(3)}x/s**`);
-    lines.push(`💰 지금 탈출 시 **${chips(Math.floor(s.bet * m))}**`);
+    lines.push(`💰 지금 탈출 시 **${chips(Math.floor(s.bet * m))}** (${netText(Math.floor(s.bet * m) - s.bet)})${m < 1 ? ' · ⚠️ 아직 본전 아래' : ''}`);
     if (s.autoTarget) lines.push(`🤖 자동 캐시아웃 **${s.autoTarget.toFixed(2)}x** 대기 중`);
   } else if (state === 'bust') {
     color = COLOR.lose;
@@ -57,9 +60,9 @@ function payload(s, { state, m, net = 0 }) {
     lines.push(`**💥 ${s.crashPoint.toFixed(2)}x 에서 폭발**`);
     lines.push(`순손익 **${netText(net)}** · 잔고 ${chips(s.balanceAfter)}`);
   } else {
-    color = COLOR.win;
-    title = s.autoHit ? '🤖 자동 캐시아웃 성공' : '💰 캐시아웃 성공';
-    lines.push(`**✅ ${m.toFixed(2)}x 탈출**`);
+    color = m >= 1 ? COLOR.win : COLOR.push;
+    title = s.autoHit ? '🤖 자동 캐시아웃 성공' : m >= 1 ? '💰 캐시아웃 성공' : '↘️ 조기 탈출';
+    lines.push(`**${m >= 1 ? '✅' : '↘️'} ${m.toFixed(2)}x 탈출**${m < 1 ? ' (본전 전 탈출 — 일부만 회수)' : ''}`);
     lines.push(`이번 판 폭발 지점: **${s.crashPoint.toFixed(2)}x**`);
     lines.push(`순손익 **${netText(net)}** · 잔고 ${chips(s.balanceAfter)}`);
   }
@@ -71,7 +74,7 @@ function payload(s, { state, m, net = 0 }) {
     .setColor(color)
     .setTitle(`${title} · 베팅 ${chips(s.bet)}`)
     .setDescription(lines.filter(Boolean).join('\n'))
-    .setFooter({ text: `하우스 엣지 ${CR.HOUSE_EDGE * 100}% · 폭발 배수는 시작 시 결정 · 캐시아웃은 서버 수신 시각 기준` });
+    .setFooter({ text: `${START.toFixed(2)}x에서 시작 · 1.00x부터 이익 · 하우스 엣지 ${CR.HOUSE_EDGE * 100}% · 폭발 배수는 시작 시 결정 · 캐시아웃은 서버 수신 시각 기준` });
   const btn = new ButtonBuilder()
     .setCustomId(cid(s.userId, 'cashout'))
     .setLabel(state === 'running' ? `캐시아웃 (${num(s.bet * m)})` : '종료')
@@ -124,7 +127,7 @@ function tick(s) {
   if (s.state !== 'running') return;
   const now = Date.now();
   if (now >= s.crashAt) return;
-  const m = Math.min(crash.multiplierAt(now - s.startAt, K), s.crashPoint);
+  const m = Math.min(crash.multiplierAt(now - s.startAt, K, START), s.crashPoint);
   s.history.push(m);
   if (s.history.length > CR.GRAPH_POINTS * 2) s.history.splice(0, s.history.length - CR.GRAPH_POINTS);
   s.live.push(payload(s, { state: 'running', m }));
@@ -135,7 +138,7 @@ module.exports = {
   game: 'crash',
   data: new SlashCommandBuilder()
     .setName('그래프')
-    .setDescription('치솟는 배수가 터지기 전에 탈출하세요 (Crash)')
+    .setDescription('0.80x에서 치솟는 배수가 터지기 전에 탈출하세요 (Crash)')
     .addIntegerOption((o) => o.setName('금액').setDescription('베팅 금액').setRequired(true).setMinValue(config.MIN_BET).setMaxValue(config.MAX_BET))
     .addNumberOption((o) => o.setName('자동캐시아웃').setDescription('이 배수에 도달하면 자동 탈출 (예: 2.0)').setMinValue(1.01).setMaxValue(CR.MAX_MULTIPLIER)),
 
@@ -154,10 +157,10 @@ module.exports = {
     }
     s.roundId = r.roundId;
     s.balance = r.balance;
-    s.crashPoint = crash.generateCrashPoint(CR.HOUSE_EDGE, CR.MAX_MULTIPLIER); // 폭발 배수 선 연산
+    s.crashPoint = crash.generateCrashPoint(CR.HOUSE_EDGE, CR.MAX_MULTIPLIER, START); // 폭발 배수 선 연산
     s.autoTarget = auto ? Math.floor(auto * 100) / 100 : null;
     s.recent = await stats.crashRecent(i.guildId, CR.RECENT_HISTORY).catch(() => []);
-    s.history = [1];
+    s.history = [START];
     s.live = new LiveMessage((p) => i.editReply(p));
 
     // 자동 캐시아웃이면 결과가 지금 확정 → 선기록 (재시작해도 같은 결과로 정산)
@@ -168,15 +171,15 @@ module.exports = {
 
     s.startAt = Date.now();
     s.state = 'running';
-    await i.editReply(payload(s, { state: 'running', m: 1 }));
+    await i.editReply(payload(s, { state: 'running', m: START }));
     const msg = await i.fetchReply().catch(() => null);
     gameState.create({ gameId: s.gameId, game: 'crash', guildId: i.guildId, channelId: i.channelId, messageId: msg?.id, players: [i.user.id], state: 'PLAYING' });
 
     s.startAt = Date.now();
-    s.crashAt = s.startAt + crash.timeToReach(s.crashPoint, K);
+    s.crashAt = s.startAt + crash.timeToReach(s.crashPoint, K, START);
     const timers = [setInterval(() => tick(s), CR.TICK_MS), setTimeout(() => bust(s).catch(console.error), Math.max(0, s.crashAt - Date.now()))];
     if (s.autoTarget && crash.autoCashoutWins(s.crashPoint, s.autoTarget)) {
-      const at = s.startAt + crash.timeToReach(s.autoTarget, K);
+      const at = s.startAt + crash.timeToReach(s.autoTarget, K, START);
       // 목표 = 폭발 배수인 경우에도 캐시아웃이 먼저 처리되도록 1ms 앞당김
       timers.push(setTimeout(() => cashout(s, s.autoTarget, true).catch(console.error), Math.max(0, Math.min(at, s.crashAt - 1) - Date.now())));
     }
@@ -187,7 +190,7 @@ module.exports = {
     const clickAt = Date.now(); // await 이전에 시각 고정
     const s = sessions.get(i.user.id);
     if (!s || s.game !== 'crash' || s.state !== 'running' || clickAt >= s.crashAt) return i.deferUpdate().catch(() => {});
-    const m = Math.min(crash.multiplierAt(clickAt - s.startAt, K), s.crashPoint);
+    const m = Math.min(crash.multiplierAt(clickAt - s.startAt, K, START), s.crashPoint);
     const done = cashout(s, m); // 상태를 동기적으로 먼저 확정 (응답 대기 중 폭발 타이머와 경합 방지)
     await i.deferUpdate();
     await done;

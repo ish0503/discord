@@ -36,6 +36,9 @@ module.exports = {
   ALERTS: { WEBHOOK_URL: env.ALERT_WEBHOOK_URL || '', THROTTLE_MS: 60_000 },
   DASHBOARD: { TOKEN: env.DASHBOARD_TOKEN || '' },
 
+  // /송금: 수수료는 소각 (부계정 칩 몰아주기 억제), 하루 한도는 보낸 금액+수수료 기준 (KST 자정 초기화)
+  TRANSFER: { MIN: 100, FEE_RATE: 0.05, DAILY_LIMIT: 200_000 },
+
   BAILOUT: { AMOUNT: 5_000, THRESHOLD: 1_000, COOLDOWN_MS: 24 * 60 * 60 * 1000 },
 
   DAILY: {
@@ -88,6 +91,8 @@ module.exports = {
 
   CRASH: {
     HOUSE_EDGE: 0.03,
+    // 배수는 0.80x에서 출발 → 본전(1.00x)까지 약 2.2초는 탈출해도 손해 (즉시 탈출로 위험 없이 이득 보는 전략 차단)
+    START_MULTIPLIER: 0.8,
     GROWTH_PER_MS: 0.0001,
     TICK_MS: 200,
     MAX_MULTIPLIER: 1000,
@@ -129,6 +134,7 @@ module.exports = {
     LOBBY_MS: 180_000,
     TURN_MS: 40_000,
     HAND_PAUSE_MS: 2_500,
+    ARCHIVE_AFTER_MS: 10 * 60_000, // 종료 후 스레드 보관까지
     RAKE: 0, // 참가비 중 운영 수수료 비율 (0 = 전액 상금)
     // 사람 참가자 수별 상금 비율 (사람 참가자 순위 기준)
     PAYOUTS: [

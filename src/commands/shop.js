@@ -6,6 +6,15 @@ const cosmetics = require('../content/cosmetics');
 const { COLOR, num, chips, ephemeral } = require('../utils/format');
 
 const PREFIX = 'sh';
+const SAMPLE = [{ rank: 'A', suit: '♠' }, { rank: 'K', suit: '♥' }, { rank: '10', suit: '♦' }];
+/** 외형 미리보기 (카드 테마는 실제 표기, 나머지는 예시) */
+function preview(it) {
+  if (it.type === 'cardTheme') return `\n　└ ${SAMPLE.map((c) => cosmetics.cardMarkup(c, it.value)).join(' ')} · ${cosmetics.cardTheme(it.value).desc}`;
+  if (it.type === 'slotTheme') return ` · ${['🍒', '🔔', '💎', '7️⃣'].map((e) => cosmetics.slotSymbol(e, it.value)).join('')}`;
+  if (it.type === 'diceSkin') return ` · ${[1, 3, 6].map((n) => cosmetics.diceFace(n, it.value)).join(' ')}`;
+  if (it.type === 'frame') return ` · ${cosmetics.framed('이름', it.value)}`;
+  return '';
+}
 const priceText = (it) => (it.price.points ? `⭐ ${num(it.price.points)}P` : `🪙 ${num(it.price.chips)}칩`);
 
 async function render(userId, guildId) {
@@ -14,7 +23,7 @@ async function render(userId, guildId) {
   for (const it of cosmetics.SHOP) (groups[it.type] ||= []).push(it);
   const lines = Object.entries(groups).flatMap(([type, list]) => [
     `**${cosmetics.TYPE_LABEL[type]}**`,
-    ...list.map((it) => `${p.inventory.includes(it.id) ? '✅' : '▫️'} ${cosmetics.itemName(it)} — ${priceText(it)}`),
+    ...list.map((it) => `${p.inventory.includes(it.id) ? '✅' : '▫️'} ${cosmetics.itemName(it)} — ${priceText(it)}${preview(it)}`),
   ]);
   const options = cosmetics.SHOP.filter((it) => !p.inventory.includes(it.id))
     .slice(0, 25)

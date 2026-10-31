@@ -42,12 +42,16 @@ const sessions=require(ROOT+'src/services/sessions');
 const wallet=require(ROOT+'src/services/wallet');
 const desc=p=>{ if(!p||typeof p==='string') return p||''; if(p.content&&!p.embeds) return p.content; const e=p.embeds?.[0]; const c=e?.calls?.find(c=>c[0]==='setDescription'); const f=e?.calls?.filter(c=>c[0]==='addFields').flatMap(c=>c[1]).map(x=>x.value).join('|'); return (c?c[1][0]:'')+(f||'')+(p.content||''); };
 let nid=5000; let pub=null; const eph=[];
+// 스레드 모의: 모집 메시지.startThread() → 스레드에 올라간 메시지는 threadLog에 기록
+const threads=[]; const threadLog=[];
+function fakeChannel(id, isThread=false){ return { id, isThread:()=>isThread, async send(p){ const m={ id:'tm'+(nid++), payload:p, async edit(q){ m.payload=q; } }; threadLog.push(m); return m; }, async setArchived(v){ this.archived=v; } }; }
+function fakeMessage(id, chan){ const msg={ id, channel:fakeChannel(chan), edit: async p=>{ pub=p; }, async startThread(o){ const t=fakeChannel('T'+id, true); t.name=o.name; threads.push(t); return t; } }; return msg; }
 function mk(uid,opts={},extra={}){ const i={ id:String(nid++), user:{id:uid,username:uid,displayAvatarURL:()=>null}, member:{displayName:uid, roles:[]}, memberPermissions:{has:()=>true}, guildId:'G', channelId:extra.chan||'C', inGuild:()=>true,
   options:{getInteger:n=>opts[n]??null,getNumber:n=>opts[n]??null,getString:n=>opts[n]??null,getBoolean:n=>opts[n]??null,getUser:n=>opts[n]??null,getRole:n=>opts[n]??null,getSubcommand:()=>opts._sub},
   values: extra.values, deferred:false, replied:false, _eph:false,
   async reply(p){ this.replied=true; if(p.flags||p.ephemeral) eph.push(`[${uid}] ${desc(p)}`); else pub=p; }, async deferReply(o){ this.deferred=true; this._eph=!!(o?.flags||o?.ephemeral); },
   async editReply(p){ if(this._eph) eph.push(`[${uid}] ${desc(p)}`); else pub=p; }, async followUp(p){ eph.push(`[${uid}] ${desc(p)}`); return {id:'f'+nid}; },
-  async deferUpdate(){ this.deferred=true; }, async update(p){ pub=p; }, async fetchReply(){ return { id:'m'+this.id, edit: async p=>{ pub=p; } }; },
+  async deferUpdate(){ this.deferred=true; }, async update(p){ pub=p; }, async fetchReply(){ return fakeMessage('m'+this.id, extra.chan||'C'); },
   webhook:{ async editMessage(m,p){ eph.push(`[${uid} private] ${desc(p)}`); } }, isButton:()=>true }; return i; }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const ids=()=>(pub?.components||[]).flatMap(r=>r.calls.find(c=>c[0]==='addComponents')[1].flat()).map(b=>(b.calls.find(x=>x[0]==='setCustomId')||[])[1]?.[0]).filter(Boolean);
@@ -57,7 +61,7 @@ const noEscrow=()=>M.User.docs.every(d=>d.escrow.length===0);
 const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=customId.split(':'); return cmds[cmd].handleButton(mk(uid,opts,extra),{action,arg:rest.join(':')}); };
 
 (async()=>{
-  ok(Object.keys(cmds).length===19, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
+  ok(Object.keys(cmds).length===21, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
 
   step('슬롯 (연속 스핀·잭팟)');
   await cmds['슬롯'].execute(mk('A',{'금액':1000}));
@@ -120,6 +124,18 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   const pl=M.GameLog.docs.find(l=>l.game==='poker'&&l.userId==='D'); ok(pl && pl.staked===2000, `바이인 2,000 기준 정산 (지급 ${pl?.payout})`);
   ok(ids().some(x=>x.includes(':again:')), '같은 설정 재시작 버튼');
 
+  step('송금·도움말');
+  M.User.docs.find(d=>d.userId==='A') || await wallet.getAccount('A','G');
+  M.User.docs.find(d=>d.userId==='A').money=50000; await wallet.getAccount('Q','G');
+  await cmds['송금'].execute(mk('A',{'유저':{id:'A'},'금액':1000})); ok(eph.at(-1).includes('자기 자신'), '자기 자신 송금 차단');
+  await cmds['송금'].execute(mk('A',{'유저':{id:'Q'},'금액':10000,'메모':'고마워'}));
+  ok(desc(pub).includes('받는 사람') && ids().some(x=>x.includes(':ok:')), '송금 확인 화면 (확인 버튼)');
+  await btn('송금','A',ids().find(x=>x.includes(':ok:')));
+  ok(money('A')===50000-10500 && money('Q')===20000, `송금 완료 (A ${money('A')}, Q ${money('Q')}) · 수수료 5% 소각`);
+  ok(desc(pub).includes('<@A> → <@Q>'), '송금 결과 공개');
+  await cmds['송금'].execute(mk('A',{'유저':{id:'Q'},'금액':195000})); ok(eph.at(-1).includes('한도'), '하루 송금 한도');
+  await cmds['도움말'].execute(mk('A')); ok(eph.at(-1)!==undefined, '도움말');
+
   step('토너먼트 (사람 1 + 봇 3, 6핸드 제한)');
   const before=money('E') ?? 10000;
   await cmds['토너먼트'].execute(mk('E',{'참가비':3000,'봇':3,'최대인원':1})); await sleep(2500);
@@ -127,7 +143,13 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   ok(tl && tl.staked===3000, `참가비 3,000 정산 (지급 ${tl?.payout}, 순위 ${tl?.detail?.place})`);
   ok(tl?.payout===3000, '사람 1명이면 상금 풀 전액 = 참가비 (봇은 상금 없음)');
   ok(M.Tournament.docs[0]?.state==='finished', `토너먼트 기록 저장 (${M.Tournament.docs[0]?.hands}핸드, ${M.Tournament.docs[0]?.endedReason})`);
-  ok(desc(pub).includes('최종 순위'), '최종 순위 표시');
+  ok(threads.length===1 && threads[0].name.includes('토너먼트'), `전용 스레드 생성 (${threads[0]?.name})`);
+  const tDesc=threadLog.map(m=>desc(m.payload));
+  ok(tDesc[0]?.includes('참가자 <@E>'), '스레드에 시작 안내 공개 (참가자 멘션)');
+  ok(tDesc.filter(d=>d.includes('🏆')||d.includes('↩️')).length>=2, `핸드별 결과 메시지 공개 기록 (${threadLog.length}개 메시지)`);
+  ok(tDesc.some(d=>d.includes('최종 순위')), '스레드에 최종 순위 공개');
+  ok(desc(pub).includes('우승') && desc(pub).includes(threads[0].id), '원래 채널 현황판 → 결과 + 스레드 링크');
+  ok(!eph.some(e=>e.includes('🂠 **보드**')), '테이블이 비공개 메시지로 바뀌지 않음');
 
   step('출석·미션·상점·인벤토리·프로필·전적·리플레이');
   await cmds['출석'].execute(mk('A')); await cmds['출석'].execute(mk('A'));
@@ -144,7 +166,7 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   await cmds['인벤토리'].handleSelect(mk('A',{}, {values:['cardTheme|outline']}), {action:'equip'});
   ok(M.Profile.docs.find(p=>p.userId==='A').equipped.cardTheme==='outline', '카드 테마 장착');
   await cmds['인벤토리'].handleSelect(mk('A',{}, {values:['cardTheme|letters']}), {action:'equip'}); ok(eph.at(-1).includes('보유하지 않은'), '미보유 아이템 장착 차단');
-  await cmds['프로필'].execute(mk('A')); ok(desc(pub).includes('보상 포인트'), '프로필 표시');
+  await cmds['프로필'].execute(mk('A')); ok(pub.files?.[0]?.name==='profile.png' && pub.files[0].data.length>10000, `프로필 이미지 카드 (${pub.files?.[0]?.data.length} bytes)`);
   await cmds['업적'].execute(mk('A')); ok(desc(pub).includes('업적') || true, '업적 목록');
   await cmds['전적'].execute(mk('A')); ok(desc(pub).includes('슬롯'), '전적 목록');
   await cmds['리플레이'].execute(mk('C')); ok(desc(pub).includes('리플레이') || desc(pub).includes('판 ID') || pub.embeds, '리플레이');
@@ -165,6 +187,8 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   await adm('점검',{'켜기':true,'메시지':'10분 점검'}); ok((await gc.gameBlockReason('G','dice'))?.includes('점검'), '점검 모드 가드');
   await adm('점검',{'켜기':false});
   await adm('이벤트',{'이름':'주말','배수':2,'시간':24}); const ev=require(ROOT+'src/services/events'); ok((await ev.pointsMultiplier('G'))===2, '이벤트 포인트 배수');
+  ok(desc(pub).includes('보상 포인트') , '이벤트 시작은 공개 공지');
+  await adm('지급',{'유저':{id:'Z'},'금액':100,'사유':'공개 지급','공개':true}); ok(desc(pub).includes('지급'), '지급 [공개] 옵션 → 공개 공지');
   await adm('감사로그'); ok(eph.length>0, '감사로그 조회');
   await adm('시즌종료'); ok(M.Season.docs.length===2 && M.Season.docs[0].endedAt, '시즌 종료 → 새 시즌');
   await adm('대시보드'); await adm('밸런스'); ok(true, '대시보드·밸런스 (aggregate는 실DB 필요)');

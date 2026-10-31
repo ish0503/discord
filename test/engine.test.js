@@ -162,20 +162,31 @@ test('블랙잭 테이블: 스플릿 — 에이스 한 장, 스플릿 후 21은 
   assert.equal(players[0].staked, 2000);
 });
 
-test('그래프: P(crash ≥ x) ≈ 0.97/x, 1 미만 없음', () => {
+test('그래프: 0.80x 시작 · x≥1에서 P(crash ≥ x) ≈ 0.97/x · 조기 탈출은 항상 손해', () => {
   const N = 200_000;
+  const START = config.CRASH.START_MULTIPLIER;
+  assert.ok(START < 1, '시작 배수는 본전(1.00x) 미만');
+  let ge1 = 0;
   let ge2 = 0;
   let ge5 = 0;
+  let ge09 = 0;
   for (let i = 0; i < N; i++) {
-    const cp = crash.generateCrashPoint(0.03, 1000);
-    assert.ok(cp >= 1 && Number.isFinite(cp));
+    const cp = crash.generateCrashPoint(0.03, 1000, START);
+    assert.ok(cp >= START && Number.isFinite(cp));
+    if (cp >= 1) ge1++;
     if (cp >= 2) ge2++;
     if (cp >= 5) ge5++;
+    if (cp >= 0.9) ge09++;
   }
+  assert.ok(Math.abs(ge1 / N - 0.97) < 0.005, `P(≥1)=${ge1 / N}`);
   assert.ok(Math.abs(ge2 / N - 0.485) < 0.01, `P(≥2)=${ge2 / N}`);
   assert.ok(Math.abs(ge5 / N - 0.194) < 0.01, `P(≥5)=${ge5 / N}`);
+  // 0.9x 탈출 기대값 = 0.9 × P(≥0.9) < 0.97 (바로 탈출해서 이득 보는 전략 없음)
+  assert.ok(0.9 * (ge09 / N) < 0.9, `0.9x 탈출 EV=${0.9 * (ge09 / N)}`);
   const k = config.CRASH.GROWTH_PER_MS;
-  assert.equal(crash.multiplierAt(crash.timeToReach(2, k) + 1, k), 2);
+  assert.equal(crash.multiplierAt(0, k, START), START);
+  assert.equal(crash.multiplierAt(crash.timeToReach(2, k, START) + 1, k, START), 2);
+  assert.equal(crash.multiplierAt(crash.timeToReach(2, k) + 1, k), 2, '시작 1.0 호환');
 });
 
 test('주사위: 합 분포 확률 & 연패 보정 효과', () => {
@@ -338,7 +349,7 @@ test('그래프 자동 캐시아웃: 목표 x의 성공 확률 ≈ 0.97/x (RTP 9
   const N = 200_000;
   for (const target of [1.5, 2, 5]) {
     let paid = 0;
-    for (let i = 0; i < N; i++) if (crash.autoCashoutWins(crash.generateCrashPoint(0.03, 1000), target)) paid += target;
+    for (let i = 0; i < N; i++) if (crash.autoCashoutWins(crash.generateCrashPoint(0.03, 1000, config.CRASH.START_MULTIPLIER), target)) paid += target;
     assert.ok(Math.abs(paid / N - 0.97) < 0.02, `target ${target}: RTP ${paid / N}`);
   }
 });
@@ -367,7 +378,14 @@ test('업적: 조건 판정과 중복 방지', () => {
 });
 
 test('꾸미기: 테마 렌더링과 상점 카탈로그 무결성', () => {
-  assert.equal(cosmetics.card({ rank: 'A', suit: '♠' }, 'outline'), 'A♤');
+  assert.equal(cosmetics.card({ rank: 'K', suit: '♥' }, 'outline'), '🤴♥️');
+  assert.equal(cosmetics.card({ rank: '10', suit: '♦' }, 'letters'), 'Td');
+  assert.equal(cosmetics.cardMarkup({ rank: 'A', suit: '♠' }, 'classic'), '`A♠`');
+  assert.equal(cosmetics.cardMarkup({ rank: 'Q', suit: '♦' }, 'emoji'), '**Q**🔷');
+  // 테마끼리 같은 카드를 서로 다르게 표기
+  const sample = { rank: 'J', suit: '♣' };
+  const shown = Object.keys(cosmetics.CARD_THEMES).map((t) => cosmetics.cardMarkup(sample, t));
+  assert.equal(new Set(shown).size, shown.length, `테마 표기 중복: ${shown}`);
   assert.equal(cosmetics.slotSymbol('7️⃣', 'space'), '🚀');
   assert.equal(cosmetics.diceFace(6, 'roman'), 'Ⅵ');
   assert.equal(cosmetics.framed('홍길동', 'fire'), '🔥 홍길동 🔥');
