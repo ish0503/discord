@@ -21,7 +21,10 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 const sessions = require('./sessions');
 const wallet = require('./wallet');
-const { displayName, unixIn, runExclusive, attachLive, captureMessage } = require('../utils/table');
+const gameState = require('./gameState');
+const guildConfig = require('./guildConfig');
+const profile = require('./profile');
+const { displayName, unixIn, runExclusive, runSoon, attachLive, captureMessage } = require('../utils/table');
 const { COLOR, ephemeral, expired, busyText } = require('../utils/format');
 
 class RoundTableManager {
@@ -126,7 +129,7 @@ class RoundTableManager {
       hostId: i.user.id,
       maxPlayers,
       state: 'lobby',
-      players: [{ id: i.user.id, name: displayName(i), marker }],
+      players: [{ id: i.user.id, name: displayName(i), marker, cos: null }],
       bets: new Map(),
       idleRounds: 0,
       lastSummary: '',
@@ -144,6 +147,7 @@ class RoundTableManager {
     try {
       await i.deferReply();
       await wallet.getAccount(i.user.id, i.guildId);
+      t.players[0].cos = await profile.cosmeticsOf(i.user.id);
     } catch (err) {
       this.#forget(t);
       sessions.end(marker);
@@ -152,8 +156,9 @@ class RoundTableManager {
 
     await i.editReply(this.render(t, maxPlayers === 1 ? '🃏 테이블 준비 중...' : ''));
     await captureMessage(t, i);
+    gameState.create({ gameId: t.id, game: this.game, guildId: t.guildId, channelId: t.channelId, messageId: t.message?.id, players: [i.user.id] });
     if (maxPlayers === 1) return runExclusive(t, () => this.startBetting(t));
-    t.timers.lobby = setTimeout(() => runExclusive(t, () => this.startBetting(t)), this.cfg.LOBBY_MS);
+    t.timers.lobby = setTimeout(() => runSoon(t, () => this.startBetting(t)), this.cfg.LOBBY_MS);
   }
 
   async startBetting(t, note = '') {
@@ -161,11 +166,12 @@ class RoundTableManager {
     clearTimeout(t.timers.lobby);
     if (!t.players.length) return this.close(t, '🚪 플레이어가 없어 테이블을 닫았습니다.');
     t.state = 'betting';
+    gameState.transition(t.id, 'BETTING');
     t.bets = new Map();
     t.note = note;
     t.betEndsAt = unixIn(this.cfg.BET_MS);
     clearTimeout(t.timers.bet);
-    t.timers.bet = setTimeout(() => runExclusive(t, () => this.deal(t)), this.cfg.BET_MS);
+    t.timers.bet = setTimeout(() => runSoon(t, () => this.deal(t)), this.cfg.BET_MS);
     t.live.push(this.render(t, this.bettingPrompt(t)));
   }
 
@@ -192,6 +198,7 @@ class RoundTableManager {
     }
     t.idleRounds = 0;
     t.state = 'playing';
+    gameState.transition(t.id, 'PLAYING');
     t.roundEntries = entries;
     await this.playRound(t, entries);
   }
@@ -211,10 +218,11 @@ class RoundTableManager {
     for (const timer of Object.values(t.timers)) clearTimeout(timer);
 
     if (wasBetting) {
-      for (const [uid, b] of t.bets) if (!b.pending) await wallet.refund(uid, b.roundId, 'table-closed').catch(console.error);
+      for (const [uid, b] of t.bets) if (!b.pending) await wallet.refund({ userId: uid, guildId: t.guildId, roundId: b.roundId, reason: 'table-closed' }).catch(console.error);
     }
     for (const p of t.players) sessions.end(p.marker);
     this.#forget(t);
+    gameState.transition(t.id, 'COMPLETED', reason);
     await t.live.final(this.render(t, reason)).catch(() => {});
   }
 
@@ -254,8 +262,10 @@ class RoundTableManager {
     const marker = sessions.start(i.user.id, this.game, { tableId: t.id }, { persistent: true });
     if (!marker) return i.reply(ephemeral(busyText));
     await i.deferReply({ flags: MessageFlags.Ephemeral });
+    let cos;
     try {
       await wallet.getAccount(i.user.id, i.guildId);
+      cos = await profile.cosmeticsOf(i.user.id);
     } catch (err) {
       sessions.end(marker);
       throw err;
@@ -265,7 +275,8 @@ class RoundTableManager {
       return i.editReply('그 사이에 자리가 찼거나 테이블이 닫혔어요.');
     }
 
-    t.players.push({ id: i.user.id, name: displayName(i), marker });
+    t.players.push({ id: i.user.id, name: displayName(i), marker, cos });
+    gameState.addPlayer(t.id, i.user.id);
     await i.editReply(
       t.state === 'playing' ? '✅ 참가 완료! 지금 판이 끝나면 다음 베팅부터 참여합니다.' : '✅ 참가 완료! 베팅 시간에 칩 버튼을 눌러 주세요.',
     );
@@ -287,7 +298,7 @@ class RoundTableManager {
     const done = await runExclusive(t, async () => {
       const b = this.confirmedBet(t, p.id);
       if (b && t.state === 'betting') {
-        refunded = (await wallet.refund(p.id, b.roundId, 'leave')).ok;
+        refunded = (await wallet.refund({ userId: p.id, guildId: t.guildId, roundId: b.roundId, reason: 'leave' })).ok;
         t.bets.delete(p.id);
       }
       t.players = t.players.filter((x) => x !== p);
@@ -322,6 +333,8 @@ class RoundTableManager {
     if (t.bets.has(uid)) return i.reply(ephemeral('이번 판은 이미 베팅했어요.'));
     const bet = this.parseBet(extra);
     if (!bet) return i.reply(ephemeral('잘못된 베팅이에요.'));
+    const blocked = (await guildConfig.gameBlockReason(t.guildId, this.game)) || (await guildConfig.betBlockReason(t.guildId, this.game, bet.amount));
+    if (blocked) return i.reply(ephemeral(blocked));
 
     const marker = { pending: true, ...bet };
     t.bets.set(uid, marker); // 같은 유저의 연타·중복 베팅 차단
@@ -330,7 +343,7 @@ class RoundTableManager {
 
     let r;
     try {
-      r = await wallet.reserve(uid, t.guildId, this.game, bet.amount);
+      r = await wallet.reserve(uid, t.guildId, this.game, bet.amount, { gameId: t.id });
     } catch (err) {
       if (t.bets.get(uid) === marker) t.bets.delete(uid);
       throw err;
@@ -341,7 +354,7 @@ class RoundTableManager {
     }
     // 예약하는 사이 딜이 시작됐거나 테이블이 닫혔으면 즉시 환불
     if (t.state !== 'betting' || t.bets.get(uid) !== marker) {
-      await wallet.refund(uid, r.roundId, 'late-bet');
+      await wallet.refund({ userId: uid, guildId: t.guildId, roundId: r.roundId, reason: 'late-bet' });
       return i.followUp(ephemeral('딜이 이미 시작돼서 베팅이 환불됐어요. 다음 판에 걸어 주세요.'));
     }
 

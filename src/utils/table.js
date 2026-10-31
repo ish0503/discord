@@ -20,6 +20,19 @@ async function runExclusive(t, fn) {
 }
 
 /**
+ * 타이머용 실행: 테이블이 바쁘면 잠시 뒤 다시 시도 (타이머 이벤트가 유실되지 않도록).
+ * fn 안에서 상태를 다시 검증해야 한다.
+ */
+function runSoon(t, fn, delay = 250) {
+  if (t.state === 'closed' || t.state === 'done') return;
+  if (t.busy) {
+    setTimeout(() => runSoon(t, fn, delay), delay);
+    return;
+  }
+  runExclusive(t, fn);
+}
+
+/**
  * 공용 메시지 편집기.
  * 최근 버튼 인터랙션 토큰(t.ui)으로 편집하고, 토큰이 만료(15분)되면 봇 토큰으로 메시지를 직접 편집한다.
  * → 여러 판 이어지는 장시간 테이블도 끊기지 않음.
@@ -43,4 +56,4 @@ async function captureMessage(t, i) {
   }
 }
 
-module.exports = { displayName, unixIn, runExclusive, attachLive, captureMessage };
+module.exports = { displayName, unixIn, runExclusive, runSoon, attachLive, captureMessage };

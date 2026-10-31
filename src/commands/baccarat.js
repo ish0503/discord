@@ -4,7 +4,8 @@
  */
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
-const wallet = require('../services/wallet');
+const settlement = require('../services/settlement');
+const gameState = require('../services/gameState');
 const { getShoe } = require('../services/shoes');
 const { RoundTableManager } = require('../services/roundTable');
 const bac = require('../engine/baccarat');
@@ -103,6 +104,10 @@ const mgr = new RoundTableManager({
     const shoe = getShoe('baccarat', t.channelId);
     const reshuffled = shoe.prepareRound();
     const round = bac.playRound(() => shoe.draw()); // 결과 선 연산
+    const outcomes = entries.map((e) => ({ e, ...bac.settle(e.side, round.winner, e.amount, BC.PAYOUT) }));
+    // 연출 전에 결과를 선기록 → 연출 도중 서버가 죽어도 이 결과대로 정산
+    gameState.transition(t.id, 'SETTLING');
+    for (const o of outcomes) await settlement.commit({ userId: o.e.id, guildId: t.guildId, roundId: o.e.roundId, payout: o.e.amount + o.net, game: 'baccarat' });
 
     // 카드 한 장씩 공개 연출
     t.view = { player: [], banker: [] };
@@ -114,24 +119,21 @@ const mgr = new RoundTableManager({
     shoe.history.push(round.winner);
 
     const lines = await Promise.all(
-      entries.map(async (e) => {
-        const { net, push } = bac.settle(e.side, round.winner, e.amount, BC.PAYOUT);
-        let st;
-        try {
-          st = await wallet.settleRound(e.id, e.roundId, e.amount + net, {
-            game: 'baccarat',
-            guildId: t.guildId,
-            inc: { baccaratRounds: 1, ...(net > 0 ? { baccaratWins: 1 } : {}) },
-            wagered: e.amount,
-            detail: { side: e.side, winner: round.winner, player: round.player, banker: round.banker },
-          });
-        } catch (err) {
-          console.error('[baccarat settle]', err);
-          st = { ok: false, error: true };
-        }
+      outcomes.map(async ({ e, net, push }) => {
+        const st = await settlement.finalize({
+          userId: e.id,
+          guildId: t.guildId,
+          roundId: e.roundId,
+          payout: e.amount + net,
+          game: 'baccarat',
+          gameId: t.id,
+          channelId: t.channelId,
+          inc: { baccaratRounds: 1, ...(net > 0 ? { baccaratWins: 1 } : {}) },
+          wagered: e.amount,
+          detail: { side: e.side, winner: round.winner, player: round.player, banker: round.banker, natural: round.natural },
+        });
         const verdict = push ? '🤝' : net > 0 ? '🎉' : '😵';
-        const tail = st.ok ? ` · 잔고 ${chips(st.balance)}` : st.error ? ' · ⚠️ 정산 오류 (자동 환불 예정)' : ' · ⚠️ 이미 처리된 판';
-        return `${verdict} **${e.name}** ${DOT[e.side]} **${netText(net)}**${tail}`;
+        return `${verdict} **${e.name}** ${DOT[e.side]} **${netText(net)}**${settlement.tail(st, chips)}`;
       }),
     );
 
@@ -147,6 +149,7 @@ const mgr = new RoundTableManager({
 
 module.exports = {
   prefix: mgr.prefix,
+  game: 'baccarat',
   data: new SlashCommandBuilder()
     .setName('바카라')
     .setDescription('채널 공유 8덱 슈 바카라 테이블 — 흐름 보드를 직접 판독하세요')

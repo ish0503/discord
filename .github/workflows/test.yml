@@ -1,0 +1,24 @@
+# main 브랜치 push·PR마다 엔진 테스트 실행.
+# 저장소 Settings → Branches → Branch protection에서 이 체크를 필수로 지정하면
+# 테스트가 실패한 코드는 main에 병합되지 않고, 따라서 Koyeb 자동 배포도 일어나지 않는다.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run e2e

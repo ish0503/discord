@@ -1,0 +1,241 @@
+/**
+ * /관리자 — 운영 명령어. 권한: 봇 소유자(BOT_OWNER_IDS) ∪ 서버 관리 권한 ∪ 지정 관리자 역할.
+ * 상태를 바꾸는 모든 작업은 AuditLog에 기록 (실행자·대상·금액·사유·전후 값).
+ */
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const config = require('../config');
+const wallet = require('../services/wallet');
+const guildConfig = require('../services/guildConfig');
+const stats = require('../services/stats');
+const seasons = require('../services/seasons');
+const events = require('../services/events');
+const gameState = require('../services/gameState');
+const profile = require('../services/profile');
+const AuditLog = require('../db/AuditLog');
+const registry = require('../games/registry');
+const { COLOR, chips, num, netText, ephemeral } = require('../utils/format');
+
+const PERIOD_CHOICES = [
+  { name: '24시간', value: '24h' },
+  { name: '7일', value: '7d' },
+  { name: '30일', value: '30d' },
+  { name: '전체', value: 'all' },
+];
+const GAME_CHOICES = registry.ids().map((id) => ({ name: registry.GAMES[id].label, value: id }));
+const pct = (x) => `${(x * 100).toFixed(2)}%`;
+
+function audit(i, action, fields = {}) {
+  return AuditLog.create({ guildId: i.guildId, actorId: i.user.id, action, ...fields }).catch((err) => console.error('[audit]', err.message));
+}
+
+function validAmount(n) {
+  return Number.isSafeInteger(n) && n > 0 && n <= config.ADMIN.MAX_ADJUST;
+}
+
+const handlers = {
+  async 대시보드(i) {
+    const o = await stats.overview(i.guildId, i.options.getString('기간') ?? '7d');
+    const gameLines = o.byGame.map((g) => `${registry.label(g._id)} ${num(g.rounds)}판 · 👥${g.players} · 베팅 ${num(g.staked)} · 실제 RTP **${pct(g.payout / Math.max(1, g.staked))}** · 하우스 ${netText(g.staked - g.payout)}`);
+    const ledgerLines = o.ledger.map((l) => `${l.amount >= 0 ? '🟢 발행' : '🔴 회수'} ${l._id} ${num(Math.abs(l.amount))} (${l.count}건)`);
+    return new EmbedBuilder()
+      .setColor(COLOR.info)
+      .setTitle(`📊 경제 대시보드 · ${o.period}`)
+      .addFields(
+        { name: '게임', value: `총 ${num(o.totals.rounds)}판 · 시간당 ${o.gamesPerHour.toFixed(1)}판 · 활성 ${num(o.activePlayers)}명`, inline: false },
+        { name: '베팅 / 지급', value: `${chips(o.totals.staked)} / ${chips(o.totals.payout)}\n실제 RTP **${pct(o.totals.rtp)}** · 하우스 순손익 **${netText(o.totals.houseNet)}**`, inline: false },
+        { name: '칩 공급', value: `지갑 ${num(o.supply.users)}개 · 유통 ${chips(o.supply.money)} · 게임에 묶임 ${chips(o.supply.escrow)}\n기간 발행 +${num(o.minted)} · 회수 −${num(o.burned)}`, inline: false },
+        { name: '장애', value: `복구 정산된 판 ${num(o.recovered)} · 관리자 확인 필요 게임 **${o.needRecovery}**`, inline: false },
+        { name: '게임별', value: gameLines.join('\n').slice(0, 1024) || '-', inline: false },
+        { name: '게임 외 칩 이동', value: ledgerLines.join('\n').slice(0, 1024) || '-', inline: false },
+      )
+      .setFooter({ text: 'RTP = 지급액(원금 포함) ÷ 베팅액(더블·스플릿·보험 포함) · 정밀 비교는 /관리자 밸런스' });
+  },
+
+  async 밸런스(i) {
+    const rows = await stats.balance(i.guildId, i.options.getString('기간') ?? '30d');
+    const lines = rows.map((r) => {
+      const name = `${registry.label(r.game)}${r.sub ? ` (${r.sub})` : ''}`;
+      const design = r.design != null ? pct(r.design) : '—';
+      return `${name}: 표본 ${num(r.n)} · 설계 ${design} · 실제 **${pct(r.actual)}** · ${r.verdict}${r.z != null ? ` (z=${r.z.toFixed(1)})` : ''}`;
+    });
+    return new EmbedBuilder()
+      .setColor(COLOR.info)
+      .setTitle('⚖️ 설계 RTP vs 실제 RTP')
+      .setDescription(lines.join('\n').slice(0, 4096) || '_데이터가 없어요._')
+      .setFooter({ text: '표본 200판 이상에서 |z| > 3이면 편차 경고 · 블랙잭·포커는 전략·상대 의존이라 설계값 없음' });
+  },
+
+  async 유저(i) {
+    const u = i.options.getUser('유저', true);
+    const [acc, p, sum, logs] = await Promise.all([wallet.getAccount(u.id, i.guildId), profile.get(u.id), stats.userSummary(u.id, i.guildId), AuditLog.find({ guildId: i.guildId, targetId: u.id }).sort({ createdAt: -1 }).limit(5).lean()]);
+    return new EmbedBuilder()
+      .setColor(COLOR.info)
+      .setTitle(`🔎 ${u.username}`)
+      .setDescription(
+        [
+          `잔고 ${chips(acc.money)} · 묶인 칩 ${chips((acc.escrow || []).reduce((s, e) => s + e.amount, 0))} (${acc.escrow?.length ?? 0}판)`,
+          `포인트 ${num(p.rewardPoints)}P · 업적 ${p.achievements.length} · 총 ${num(p.totals.games)}판 · 연속 출석 ${acc.dailyStreak}일`,
+          '',
+          ...sum.map((g) => `${registry.label(g._id)} ${num(g.rounds)}판 · RTP ${pct(g.payout / Math.max(1, g.staked))} · ${netText(g.net)}`),
+          '',
+          '**최근 관리 기록**',
+          ...logs.map((l) => `<t:${Math.floor(new Date(l.createdAt).getTime() / 1000)}:R> ${l.action} ${l.amount ? num(l.amount) : ''} — ${l.reason ?? ''} (by <@${l.actorId}>)`),
+        ].join('\n'),
+      );
+  },
+
+  async 지급(i) {
+    const u = i.options.getUser('유저', true);
+    const amount = i.options.getInteger('금액', true);
+    const reason = i.options.getString('사유', true).trim();
+    if (!validAmount(amount)) return `금액은 1 ~ ${num(config.ADMIN.MAX_ADJUST)} 사이여야 해요.`;
+    const before = (await wallet.getAccount(u.id, i.guildId)).money;
+    const doc = await wallet.grant({ userId: u.id, guildId: i.guildId, amount, type: 'admin_grant', reason, actorId: i.user.id });
+    await audit(i, 'wallet.grant', { targetId: u.id, amount, reason, before, after: doc.money });
+    return `✅ <@${u.id}> 에게 ${chips(amount)} 지급 (${num(before)} → ${num(doc.money)}) · 사유: ${reason}`;
+  },
+
+  async 회수(i) {
+    const u = i.options.getUser('유저', true);
+    const amount = i.options.getInteger('금액', true);
+    const reason = i.options.getString('사유', true).trim();
+    if (!validAmount(amount)) return `금액은 1 ~ ${num(config.ADMIN.MAX_ADJUST)} 사이여야 해요.`;
+    const before = (await wallet.getAccount(u.id, i.guildId)).money;
+    const doc = await wallet.debit({ userId: u.id, guildId: i.guildId, amount, type: 'admin_revoke', reason, actorId: i.user.id });
+    if (!doc) return `❌ 잔고(${num(before)})보다 많이 회수할 수 없어요. (게임에 묶인 칩은 회수 대상이 아님)`;
+    await audit(i, 'wallet.revoke', { targetId: u.id, amount, reason, before, after: doc.money });
+    return `✅ <@${u.id}> 에게서 ${chips(amount)} 회수 (${num(before)} → ${num(doc.money)}) · 사유: ${reason}`;
+  },
+
+  async 게임(i) {
+    const game = i.options.getString('게임', true);
+    const enabled = i.options.getBoolean('활성');
+    const min = i.options.getInteger('최소');
+    const max = i.options.getInteger('최대');
+    const before = await guildConfig.get(i.guildId);
+    const change = {};
+    if (enabled === true) change.$pull = { disabledGames: game };
+    if (enabled === false) change.$addToSet = { disabledGames: game };
+    const limits = { ...(before.betLimits?.[game] || {}) };
+    if (min !== null) limits.min = min;
+    if (max !== null) limits.max = max;
+    if (limits.min && limits.max && limits.min > limits.max) return '❌ 최소가 최대보다 클 수 없어요.';
+    if (min !== null || max !== null) change.$set = { [`betLimits.${game}`]: limits };
+    if (!Object.keys(change).length) {
+      const l = await guildConfig.betLimits(i.guildId, game);
+      return `${registry.label(game)}: ${before.disabledGames.includes(game) ? '⛔ 비활성' : '✅ 활성'} · 베팅 ${num(l.min)} ~ ${num(l.max)}`;
+    }
+    const after = await guildConfig.update(i.guildId, change);
+    await audit(i, 'config.game', { targetId: game, before: { disabled: before.disabledGames.includes(game), limits: before.betLimits?.[game] }, after: { disabled: after.disabledGames.includes(game), limits: after.betLimits?.[game] } });
+    const l = await guildConfig.betLimits(i.guildId, game);
+    return `✅ ${registry.label(game)}: ${after.disabledGames.includes(game) ? '⛔ 비활성' : '✅ 활성'} · 베팅 ${num(l.min)} ~ ${num(l.max)}`;
+  },
+
+  async 점검(i) {
+    const on = i.options.getBoolean('켜기', true);
+    const message = i.options.getString('메시지') ?? '';
+    await guildConfig.update(i.guildId, { $set: { maintenance: { on, message } } });
+    await audit(i, 'config.maintenance', { after: { on, message } });
+    return on ? `🛠️ 점검 모드 켜짐 — 새 게임 시작이 막힙니다. (진행 중 게임은 계속)${message ? `\n안내: ${message}` : ''}` : '✅ 점검 모드 해제';
+  },
+
+  async 감사로그(i) {
+    const n = i.options.getInteger('개수') ?? 15;
+    const logs = await AuditLog.find({ guildId: i.guildId }).sort({ createdAt: -1 }).limit(n).lean();
+    return new EmbedBuilder()
+      .setColor(COLOR.info)
+      .setTitle('🧾 감사 로그')
+      .setDescription(
+        logs.map((l) => `<t:${Math.floor(new Date(l.createdAt).getTime() / 1000)}:f> <@${l.actorId}> **${l.action}**${l.targetId ? ` → ${/^\d+$/.test(l.targetId) ? `<@${l.targetId}>` : l.targetId}` : ''}${l.amount ? ` ${num(l.amount)}` : ''}${l.reason ? ` · ${l.reason}` : ''}`).join('\n').slice(0, 4096) || '_기록 없음_',
+      );
+  },
+
+  async 복구(i) {
+    const id = i.options.getString('게임id');
+    if (!id) {
+      const list = await gameState.listRecovery(i.guildId);
+      return list.length ? `🔧 확인 필요 게임:\n${list.map((g) => `\`${g.gameId}\` ${registry.label(g.game)} · ${g.history.at(-1)?.note ?? ''}`).join('\n')}` : '✅ 확인이 필요한 게임이 없어요.';
+    }
+    const out = await gameState.retry(id);
+    await audit(i, 'recovery.retry', { targetId: id, after: { settled: out.settled, refunded: out.refunded, failed: out.failed } });
+    return `🔧 재시도 결과: 정산 ${out.settled} · 환불 ${out.refunded} · 실패 ${out.failed}`;
+  },
+
+  async 시즌종료(i) {
+    const r = await seasons.end(i.guildId, { channelId: i.channelId });
+    if (!r) return '이미 종료 처리된 시즌이에요.';
+    await audit(i, 'season.end', { after: { number: r.closed.number, top: r.closed.results.slice(0, 3) } });
+    return `🏁 시즌 ${r.closed.number} 종료!\n${r.closed.results.slice(0, 5).map((x) => `${x.rank}위 <@${x.userId}> ${netText(x.net)} (${num(x.games)}판)`).join('\n') || '참가자 없음'}\n➡️ 시즌 ${r.next.number} 시작`;
+  },
+
+  async 이벤트(i) {
+    const name = i.options.getString('이름', true);
+    const multiplier = i.options.getNumber('배수', true);
+    const hours = i.options.getInteger('시간', true);
+    const e = await events.create({ guildId: i.guildId, name, multiplier, hours, createdBy: i.user.id });
+    await audit(i, 'event.create', { after: { name, multiplier, hours } });
+    return `🎉 이벤트 **${name}** 시작 — 보상 포인트 ×${multiplier}, <t:${Math.floor(e.endsAt.getTime() / 1000)}:R> 종료 (게임 확률·배당에는 영향 없음)`;
+  },
+
+  async 이벤트종료(i) {
+    const n = await events.endAll(i.guildId);
+    await audit(i, 'event.endAll', { amount: n });
+    return `진행 중 이벤트 ${n}개 종료`;
+  },
+
+  async 관리자역할(i) {
+    const role = i.options.getRole('역할');
+    await guildConfig.update(i.guildId, { $set: { adminRoleId: role?.id ?? null } });
+    await audit(i, 'config.adminRole', { targetId: role?.id ?? null });
+    return role ? `✅ 관리자 역할: <@&${role.id}>` : '✅ 관리자 역할 해제 (서버 관리 권한자만 사용 가능)';
+  },
+};
+
+const data = new SlashCommandBuilder()
+  .setName('관리자')
+  .setDescription('카지노 운영 명령어')
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addSubcommand((s) => s.setName('대시보드').setDescription('경제·게임 통계').addStringOption((o) => o.setName('기간').setDescription('기간').addChoices(...PERIOD_CHOICES)))
+  .addSubcommand((s) => s.setName('밸런스').setDescription('설계 RTP 대비 실제 RTP 편차 분석').addStringOption((o) => o.setName('기간').setDescription('기간').addChoices(...PERIOD_CHOICES)))
+  .addSubcommand((s) => s.setName('유저').setDescription('유저 정보').addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true)))
+  .addSubcommand((s) =>
+    s.setName('지급').setDescription('칩 지급 (감사 로그 기록)')
+      .addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true))
+      .addIntegerOption((o) => o.setName('금액').setDescription('금액').setRequired(true).setMinValue(1).setMaxValue(config.ADMIN.MAX_ADJUST))
+      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
+  )
+  .addSubcommand((s) =>
+    s.setName('회수').setDescription('칩 회수 (감사 로그 기록)')
+      .addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true))
+      .addIntegerOption((o) => o.setName('금액').setDescription('금액').setRequired(true).setMinValue(1).setMaxValue(config.ADMIN.MAX_ADJUST))
+      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
+  )
+  .addSubcommand((s) =>
+    s.setName('게임').setDescription('게임 활성/비활성·베팅 한도')
+      .addStringOption((o) => o.setName('게임').setDescription('게임').setRequired(true).addChoices(...GAME_CHOICES))
+      .addBooleanOption((o) => o.setName('활성').setDescription('활성 여부'))
+      .addIntegerOption((o) => o.setName('최소').setDescription('최소 베팅').setMinValue(1))
+      .addIntegerOption((o) => o.setName('최대').setDescription('최대 베팅').setMinValue(1)),
+  )
+  .addSubcommand((s) => s.setName('점검').setDescription('점검 모드').addBooleanOption((o) => o.setName('켜기').setDescription('켜기/끄기').setRequired(true)).addStringOption((o) => o.setName('메시지').setDescription('안내 메시지')))
+  .addSubcommand((s) => s.setName('감사로그').setDescription('관리 작업 기록').addIntegerOption((o) => o.setName('개수').setDescription('개수').setMinValue(1).setMaxValue(40)))
+  .addSubcommand((s) => s.setName('복구').setDescription('정산 실패 게임 목록 / 재시도').addStringOption((o) => o.setName('게임id').setDescription('재시도할 게임 ID')))
+  .addSubcommand((s) => s.setName('시즌종료').setDescription('현재 시즌 종료 & 새 시즌 시작'))
+  .addSubcommand((s) =>
+    s.setName('이벤트').setDescription('보상 포인트 배수 이벤트 시작')
+      .addStringOption((o) => o.setName('이름').setDescription('이벤트 이름').setRequired(true).setMaxLength(50))
+      .addNumberOption((o) => o.setName('배수').setDescription('포인트 배수').setRequired(true).setMinValue(1.1).setMaxValue(5))
+      .addIntegerOption((o) => o.setName('시간').setDescription('진행 시간(시간)').setRequired(true).setMinValue(1).setMaxValue(24 * 14)),
+  )
+  .addSubcommand((s) => s.setName('이벤트종료').setDescription('진행 중 이벤트 모두 종료'))
+  .addSubcommand((s) => s.setName('관리자역할').setDescription('관리자 역할 지정 (비우면 해제)').addRoleOption((o) => o.setName('역할').setDescription('역할')));
+
+module.exports = {
+  data,
+  async execute(i) {
+    if (!(await guildConfig.isAdmin(i))) return i.reply(ephemeral('🔒 관리자만 사용할 수 있어요.'));
+    await i.deferReply({ ephemeral: true });
+    const out = await handlers[i.options.getSubcommand()](i);
+    return i.editReply(typeof out === 'string' ? { content: out, allowedMentions: { parse: [] } } : { embeds: [out] });
+  },
+};

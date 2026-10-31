@@ -150,39 +150,51 @@ const BOT_STYLES = {
 };
 
 /**
- * 봇 액션 결정.
- * strength = 승률 / (1 / 인원수) — 1이면 테이블 평균, 2면 평균의 두 배.
- * 상대가 많을수록 블러핑 빈도는 줄어든다 (실제 포커 이론과 동일한 경향).
+ * 노리밋 봇 액션 결정.
+ * strength = 승률 × 인원수 (1 = 테이블 평균). 상대가 많을수록 블러핑 빈도 감소.
+ * 베팅 크기는 팟 대비 비율, 숏스택(10BB 이하)은 강한 패에서 올인.
  *
- * @param a   analyze() 결과
- * @param ctx { opponents, toCall, pot, canRaise, street }
- * @returns { act: 'check'|'call'|'raise'|'fold', kind }
- *   kind: value(진짜 패) / semibluff(드로우) / bluff(뻥카) / slowplay / check / call / fold
+ * @param ctx { opponents, toCall, pot, stack, streetIn, currentBet, minRaise, minTo, maxTo, canRaise, bb, street }
+ * @returns { type: 'fold'|'check'|'call'|'raise'|'allin', to?, kind }
+ *   kind(의도): value(진짜 패) / semibluff(드로우) / bluff(뻥카) / slowplay / check / call / fold
  */
 function botDecide(a, ctx, style, rand = Math.random) {
   const n = Math.max(1, ctx.opponents);
   const strength = a.equity * (n + 1);
-  const drawing = ctx.street !== '리버' && a.current.category < 4 && a.strongMadeProb >= 0.25;
-  const bluffRate = ((0.08 + 0.15 * a.scare + (ctx.street === '리버' ? 0.06 : 0)) * style.bluff) / n;
-  // 베팅·레이즈의 "실제 의도"는 결정 경로가 아니라 당시 패 강도로 분류해 기록한다
-  const aggressive = () => ({ act: 'raise', kind: strength >= 1 ? 'value' : drawing ? 'semibluff' : 'bluff' });
+  const postflop = ctx.street !== '프리플랍';
+  const drawing = postflop && ctx.street !== '리버' && a.current.category < 4 && a.strongMadeProb >= 0.25;
+  const bluffRate = ((0.07 + 0.15 * a.scare + (ctx.street === '리버' ? 0.05 : 0)) * style.bluff) / n;
+  const kind = () => (strength >= 1 ? 'value' : drawing ? 'semibluff' : 'bluff');
+  const sizeTo = (frac) => {
+    const target = ctx.currentBet + Math.max(ctx.minRaise, Math.round((ctx.pot + ctx.toCall) * frac));
+    return Math.min(Math.max(target, ctx.minTo), ctx.maxTo);
+  };
+  const raise = (frac) => ({ type: 'raise', to: sizeTo(frac), kind: kind() });
+  const shove = () => ({ type: 'allin', kind: kind() });
+  const shortStack = ctx.stack + ctx.streetIn <= ctx.bb * 10;
+
+  if (ctx.canRaise && shortStack && strength >= 1.15 * style.tight) return shove();
 
   if (ctx.toCall === 0) {
-    if (strength >= 1.8 * style.tight) {
-      return rand() < Math.min(0.95, 0.8 * style.aggr) ? aggressive() : { act: 'check', kind: 'slowplay' };
+    if (ctx.canRaise && strength >= 1.8 * style.tight) {
+      return rand() < Math.min(0.95, 0.8 * style.aggr) ? raise(0.6 + rand() * 0.4) : { type: 'check', kind: 'slowplay' };
     }
-    if (strength >= 1.25 * style.tight && rand() < 0.5 * style.aggr) return aggressive();
-    if (drawing && rand() < 0.4 * style.aggr) return aggressive();
-    if (rand() < bluffRate) return aggressive();
-    return { act: 'check', kind: 'check' };
+    if (ctx.canRaise && strength >= 1.25 * style.tight && rand() < 0.5 * style.aggr) return raise(0.5);
+    if (ctx.canRaise && drawing && rand() < 0.4 * style.aggr) return raise(0.55);
+    if (ctx.canRaise && rand() < bluffRate) return raise(0.5);
+    return { type: 'check', kind: 'check' };
   }
 
   const potOdds = ctx.toCall / (ctx.pot + ctx.toCall);
-  if (ctx.canRaise && strength >= 2 * style.tight && rand() < 0.7 * style.aggr) return aggressive();
-  if (ctx.canRaise && drawing && rand() < 0.15 * style.aggr) return aggressive();
-  if (ctx.canRaise && rand() < bluffRate * 0.4) return aggressive();
-  if (a.equity >= potOdds + 0.03 - style.loose) return { act: 'call', kind: 'call' };
-  return { act: 'fold', kind: 'fold' };
+  if (ctx.canRaise && strength >= 2.2 * style.tight && rand() < 0.6 * style.aggr) {
+    return strength >= 3 && rand() < 0.3 ? shove() : raise(0.8);
+  }
+  if (ctx.canRaise && drawing && rand() < 0.12 * style.aggr) return raise(0.7);
+  if (ctx.canRaise && rand() < bluffRate * 0.3) return raise(0.7);
+  // 스택 대비 큰 콜일수록 더 높은 승률 요구
+  const commit = ctx.toCall / Math.max(1, ctx.stack + ctx.streetIn);
+  if (a.equity >= potOdds + 0.03 - style.loose + commit * 0.15) return { type: 'call', kind: 'call' };
+  return { type: 'fold', kind: 'fold' };
 }
 
 module.exports = {

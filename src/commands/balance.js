@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
 const wallet = require('../services/wallet');
+const jackpot = require('../services/jackpot');
 const { COLOR, chips, num, ephemeral } = require('../utils/format');
 
 const PREFIX = 'bal';
@@ -25,8 +26,8 @@ function payload(user, doc) {
       { name: '🎲 주사위', value: `${num(st.diceWins ?? 0)}승 / ${num(st.diceRolls ?? 0)}회`, inline: true },
       { name: '🎭 포커페이스', value: `${num(st.pokerWins ?? 0)}승 / ${num(st.pokerHands ?? 0)}판`, inline: true },
       { name: '🎴 바카라', value: `${num(st.baccaratWins ?? 0)}승 / ${num(st.baccaratRounds ?? 0)}판`, inline: true },
-    )
-    .setFooter({ text: `총 베팅액 ${num(st.totalWagered ?? 0)} · 최종 갱신 ${doc.updatedAt ? new Date(doc.updatedAt).toLocaleString('ko-KR') : '-'}` });
+      { name: '🏆 토너먼트', value: `우승 ${num(st.tournamentWins ?? 0)} / ${num(st.tournaments ?? 0)}회`, inline: true },
+    );
 
   const components = [];
   if (doc.money < B.THRESHOLD) {
@@ -49,8 +50,10 @@ module.exports = {
 
   async execute(i) {
     await i.deferReply();
-    const doc = await wallet.getAccount(i.user.id, i.guildId);
-    await i.editReply(payload(i.user, doc));
+    const [doc, pool] = await Promise.all([wallet.getAccount(i.user.id, i.guildId), jackpot.get(i.guildId)]);
+    const p = payload(i.user, doc);
+    p.embeds[0].setFooter({ text: `🎰 현재 슬롯 잭팟 ${num(pool.amount)} · /출석 /미션 /프로필 /상점` });
+    await i.editReply(p);
   },
 
   async handleButton(i, { action }) {
