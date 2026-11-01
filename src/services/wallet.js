@@ -283,6 +283,21 @@ async function grant({ userId, guildId, amount, type, reason, actorId }) {
   return doc;
 }
 
+/**
+ * 멱등 발행: 같은 refId로는 한 번만 지급 (보스·예측 보상 등). 지갑의 txLog 표식과 함께 원자적으로 반영.
+ * @returns 지급했으면 true, 이미 지급된 refId면 false
+ */
+async function grantOnce({ userId, guildId, amount, type, reason, refId }) {
+  assertAmount(amount);
+  if (!refId) throw new Error('grantOnce: refId 필요');
+  await getAccount(userId, guildId);
+  const key = economyKey(guildId);
+  const mark = `grant:${refId}`;
+  const res = await User.updateOne({ userId, guildId: key, txLog: { $ne: mark } }, { $inc: { money: amount }, $push: { txLog: { $each: [mark], $slice: TX_LOG_KEEP } } });
+  await ledgerOnce({ economyKey: key, guildId, userId, type, amount, reason, actorId: 'system', refId: mark });
+  return res.modifiedCount === 1;
+}
+
 /** 회수·소비: 잔고가 충분할 때만 (부족하면 null) */
 async function debit({ userId, guildId, amount, type, reason, actorId }) {
   assertAmount(amount);
@@ -475,6 +490,7 @@ module.exports = {
   recoverPrevious,
   recoverGame,
   grant,
+  grantOnce,
   debit,
   transfer,
   transferredToday,

@@ -89,6 +89,7 @@ module.exports = {
           achievements: p.achievements || [],
           games: summary,
           badges: extras?.badges ?? [],
+          clanTag: extras?.clanTag ?? null,
           rank: await balanceRank(i.guildId, acc.money),
         });
         const file = new AttachmentBuilder(png, { name: 'profile.png' });

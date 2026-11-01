@@ -34,6 +34,8 @@ const profileSchema = new Schema(
     ruleHistory: { type: [{ key: String, ruleId: String, progress: Number, completed: Boolean, _id: false }], default: [] },
     ruleCompletions: { type: Number, default: 0 },
     storyRewards: { type: [String], default: [] }, // 보상 받은 스토리 챕터 (서버가 달라도 1회)
+    collectionSets: { type: [String], default: [] }, // 보상 받은 수집 세트
+    showcase: { type: [String], default: [] }, // 프로필에 전시할 수집품 (최대 3)
     // 처리한 정산 이벤트 id (최근 300개) — Outbox 재처리 시 전적·미션 중복 반영 방지
     processedEvents: { type: [String], default: [] },
     winStreak: { type: Number, default: 0 },

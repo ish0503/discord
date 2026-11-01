@@ -61,7 +61,7 @@ const noEscrow=()=>M.User.docs.every(d=>d.escrow.length===0);
 const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=customId.split(':'); return cmds[cmd].handleButton(mk(uid,opts,extra),{action,arg:rest.join(':')}); };
 
 (async()=>{
-  ok(Object.keys(cmds).length===24, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
+  ok(Object.keys(cmds).length===26, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
 
   step('슬롯 (연속 스핀·잭팟)');
   await cmds['슬롯'].execute(mk('A',{'금액':1000}));
@@ -201,6 +201,22 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   await cmds['스토리'].execute(mk('A',sub('지도'))); ok(desc(pub).includes('1장'), '스토리 지도');
   await cmds['명예의전당'].execute(mk('A',sub('목록'))); ok(desc(pub).includes('현재 최고 기록'), '명예의 전당 목록');
   await cmds['명예의전당'].execute(mk('A',sub('기록'))); ok(desc(pub).includes('보유 기록'), '명예의 전당 개인 기록');
+
+  step('클랜 · 월드 보스');
+  const CO='100000000000000901', CM='100000000000000902';
+  await wallet.getAccount(CO,'G'); M.User.docs.find(d=>d.userId===CO).money=200000;
+  await cmds['클랜'].execute(mk(CO,sub('생성',{'이름':'테스트 클랜','태그':'TEST','엠블럼':'🔥'}))); ok(desc(pub).includes('창설'), '클랜 생성');
+  await cmds['클랜'].execute(mk(CM,sub('신청',{'이름':'테스트 클랜'}))); ok(eph.at(-1).includes('신청했어요'), '클랜 가입 신청');
+  await cmds['클랜'].execute(mk(CM,sub('승인',{'유저':{id:CM}}))); ok(eph.at(-1).includes('부클랜장 이상'), '권한 없는 승인 차단');
+  await cmds['클랜'].execute(mk(CO,sub('승인',{'유저':{id:CM}}))); ok(desc(pub).includes('합류'), '클랜 가입 승인');
+  await cmds['클랜'].execute(mk(CO,sub('정보'))); ok(desc(pub).includes('최근 활동'), '클랜 정보');
+  await cmds['클랜'].execute(mk(CO,sub('순위'))); ok(desc(pub).includes('TEST'), '클랜 순위');
+  await cmds['보스'].execute(mk(CO,sub('공격'))); ok(eph.at(-1).includes('보스가 없어요'), '보스 없을 때 안내');
+  await cmds['관리자'].execute(mk('ADMIN',{_sub:'보스시작','종류':'golem','시간':24})); ok(desc(pub).includes('체력'), '관리자 보스 소환 (공개 공지)');
+  await cmds['보스'].execute(mk(CO,sub('공격'))); ok(desc(pub).includes('피해'), '보스 공격');
+  await cmds['보스'].execute(mk(CO,sub('순위'))); ok(desc(pub).includes(CO), '보스 기여 순위');
+  await cmds['보스'].execute(mk(CO,sub('기록'))); ok(desc(pub).includes('도감'), '보스 도감');
+  await cmds['관리자'].execute(mk('ADMIN',{_sub:'보스종료'})); ok(desc(pub).includes('종료'), '보스 종료');
 
   step('관리자');
   const adm=(sub,opts={})=>cmds['관리자'].execute(mk('ADMIN',{_sub:sub,...opts}));

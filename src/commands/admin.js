@@ -52,6 +52,8 @@ const fail = (text) => ({ fail: text });
  */
 const PUBLIC = {
   이벤트: () => true,
+  보스시작: () => true,
+  보스종료: () => true,
   이벤트종료: async (i) => (await events.active(i.guildId)).length > 0,
   시즌종료: () => true,
   점검: () => true,
@@ -277,6 +279,60 @@ const handlers = {
     return `🕶️ <@${u.id}> 의 명예의 전당 기록 ${n}건을 익명 처리했어요 (수치·날짜는 보존). 사유: ${reason}`;
   },
 
+  async 보스시작(i) {
+    const boss = require('../services/worldBoss');
+    const bosses = require('../content/bosses');
+    const r = await boss.start({ guildId: i.guildId, defId: i.options.getString('종류'), hours: i.options.getInteger('시간') ?? config.BOSS.DEFAULT_HOURS, actorId: i.user.id, channelId: i.channelId });
+    if (!r.ok) return fail(`❌ ${r.reason}`);
+    await audit(i, 'boss.start', { targetId: r.boss.bossId, after: { defId: r.def.id, maxHp: r.boss.maxHp, endsAt: r.boss.endsAt } });
+    const end = Math.floor(new Date(r.boss.endsAt).getTime() / 1000);
+    return announce(
+      `${r.def.emoji} 월드 보스 출현! ${r.def.name}`,
+      [`_${r.def.flavor}_`, '', `❤️ 체력 **${num(r.boss.maxHp)}** · ⏰ <t:${end}:R> 도망`, `⚔️ \`/보스 공격\` 하루 ${config.BOSS.DAILY_ATTEMPTS}회 (무료) · 평소 게임도 지원 피해`, '🎁 참여 보스 카드 · 처치 시 황금 카드와 칩 보상(상한 있음)'].join('\n'),
+      COLOR.lose,
+    );
+  },
+
+  async 보스종료(i) {
+    const boss = require('../services/worldBoss');
+    const b = await boss.active(i.guildId);
+    if (!b) return '진행 중인 보스가 없어요.';
+    await boss.finish(b.bossId, 'failed');
+    await audit(i, 'boss.end', { targetId: b.bossId, reason: i.options.getString('사유') ?? '' });
+    return announce('💨 월드 보스 종료', '관리자가 이번 보스 이벤트를 종료했어요. 참여 보상(보스 카드)은 지급됩니다.', COLOR.push);
+  },
+
+  async 클랜해산(i) {
+    const name = i.options.getString('이름', true);
+    const reason = i.options.getString('사유', true).trim();
+    const r = await require('../services/clan').adminDisband(i.guildId, name, i.user.id);
+    if (!r.ok) return `❌ ${r.reason}`;
+    await audit(i, 'clan.adminDisband', { targetId: r.clan.clanId, reason, before: { name: r.clan.name, members: r.members, level: r.clan.level } });
+    return `🏳️ 클랜 **${r.clan.name}** 강제 해산 (멤버 ${r.members}명) · 사유: ${reason}`;
+  },
+
+  async 보상이력(i) {
+    const Ledger = require('../db/Ledger');
+    const types = ['boss_reward', 'season_reward', 'prediction_payout', 'admin_grant', 'clan_create', 'transfer_out'];
+    const u = i.options.getUser('유저');
+    const rows = await Ledger.find({ economyKey: wallet.economyKey(i.guildId), type: { $in: types }, ...(u ? { userId: u.id } : {}) }).sort({ createdAt: -1 }).limit(20).lean();
+    return new EmbedBuilder()
+      .setColor(COLOR.info)
+      .setTitle(`🎁 보상·발행 이력${u ? ` · ${u.username}` : ''}`)
+      .setDescription(rows.map((l) => `<t:${Math.floor(new Date(l.createdAt).getTime() / 1000)}:R> <@${l.userId}> **${l.type}** ${l.amount > 0 ? '+' : ''}${num(l.amount)}${l.reason ? ` · ${l.reason}` : ''}`).join('\n').slice(0, 4096) || '_기록 없음_')
+      .setFooter({ text: '모든 게임 외 칩 이동은 원장(Ledger)에 남아요 · 전체는 /관리자 대시보드' });
+  },
+
+  async 악용기록(i) {
+    const actions = ['settlement.rejected', 'settlement.batch-rejected', 'recovery.blocked-refund', 'rank.suspicious', 'room.code-bruteforce'];
+    const logs = await AuditLog.find({ guildId: i.guildId, action: { $in: actions } }).sort({ createdAt: -1 }).limit(20).lean();
+    return new EmbedBuilder()
+      .setColor(logs.length ? COLOR.lose : COLOR.win)
+      .setTitle('🚨 악용·이상 징후 기록')
+      .setDescription(logs.map((l) => `<t:${Math.floor(new Date(l.createdAt).getTime() / 1000)}:R> **${l.action}**${l.targetId ? ` <@${l.targetId}>` : ''}${l.amount ? ` ${num(l.amount)}` : ''} — ${l.reason ?? ''}`).join('\n').slice(0, 4096) || '_기록 없음_')
+      .setFooter({ text: '정산 검증 실패·랭크 부스팅 의심·초대 코드 무차별 대입 등을 자동 기록해요' });
+  },
+
   async 관리자역할(i) {
     const role = i.options.getRole('역할');
     await guildConfig.update(i.guildId, { $set: { adminRoleId: role?.id ?? null } });
@@ -335,6 +391,19 @@ const data = new SlashCommandBuilder()
       .addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true))
       .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
   )
+  .addSubcommand((s) =>
+    s.setName('보스시작').setDescription('월드 보스 소환 (서버 공지)')
+      .addStringOption((o) => o.setName('종류').setDescription('보스 (비우면 무작위)').addChoices(...require('../content/bosses').BOSSES.map((b) => ({ name: b.name, value: b.id }))))
+      .addIntegerOption((o) => o.setName('시간').setDescription('진행 시간(시간, 기본 48)').setMinValue(1).setMaxValue(168)),
+  )
+  .addSubcommand((s) => s.setName('보스종료').setDescription('진행 중인 월드 보스 종료').addStringOption((o) => o.setName('사유').setDescription('사유')))
+  .addSubcommand((s) =>
+    s.setName('클랜해산').setDescription('클랜 강제 해산 (감사 로그)')
+      .addStringOption((o) => o.setName('이름').setDescription('클랜 이름').setRequired(true))
+      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
+  )
+  .addSubcommand((s) => s.setName('보상이력').setDescription('보상·발행 칩 이력').addUserOption((o) => o.setName('유저').setDescription('대상 (선택)')))
+  .addSubcommand((s) => s.setName('악용기록').setDescription('정산 검증 실패·부스팅 의심 등 이상 징후'))
   .addSubcommand((s) => s.setName('관리자역할').setDescription('관리자 역할 지정 (비우면 해제)').addRoleOption((o) => o.setName('역할').setDescription('역할')));
 
 module.exports = {

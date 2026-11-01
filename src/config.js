@@ -48,6 +48,35 @@ module.exports = {
   // 단일 인스턴스 리더 임대 (scheduler·복구·Outbox 처리는 임대를 가진 인스턴스만)
   INSTANCE: { LEASE_TTL_MS: 45_000, RENEW_MS: 15_000, WAIT_LOG_MS: 30_000 },
 
+  // 클랜 (이용자 길드) — 경험치는 플레이 횟수·승리 기반, 칩과 분리
+  CLAN: {
+    CREATE_COST: 50_000, // 생성 비용 (칩 회수 → 원장 기록)
+    BASE_MEMBERS: 10,
+    MEMBERS_PER_LEVEL: 2,
+    MAX_MEMBERS_CAP: 30,
+    MAX_LEVEL: 20,
+    LEVEL_BASE_EXP: 500,
+    EXP_PER_ROUND: 10,
+    EXP_WIN_BONUS: 5,
+    EXP_TOURNAMENT_BONUS: 40,
+    DAILY_EXP_CAP_PER_MEMBER: 300, // 서버×유저당 하루 기여 상한 (클랜을 옮겨도 그대로)
+    REJOIN_COOLDOWN_MS: 24 * 3600_000, // 탈퇴·추방 후 다른 클랜 가입 대기
+    SEASON_MIN_TENURE_MS: 3 * 86400_000, // 시즌 보상 받으려면 최소 소속 기간
+    MAX_PENDING_APPLICATIONS: 3,
+  },
+
+  // 월드 보스 — 공격은 무료(칩 없음), 칩 보상은 처치 시에만 + 상한
+  BOSS: {
+    DAILY_ATTEMPTS: 3,
+    PASSIVE_DAILY_CAP: 60, // 평소 게임으로 주는 지원 피해 하루 상한
+    DEFAULT_HOURS: 48,
+    CHIP_REWARD_BASE: 1_000, // 처치 성공 시 참여자 기본 칩
+    CHIP_REWARD_CAP: 5_000, // 1인 최대 칩 보상
+    MIN_ACCOUNT_AGE_DAYS: 14, // 칩 보상 자격: 디스코드 계정 나이
+    MIN_GAMES_FOR_CHIPS: 5, // 칩 보상 자격: 이 서버에서 실제 플레이한 판 수
+    MIN_CONTRIBUTION: 30, // 보상 자격 최소 기여도
+  },
+
   // /송금: 수수료는 소각 (부계정 칩 몰아주기 억제), 하루 한도는 보낸 금액+수수료 기준 (KST 자정 초기화)
   TRANSFER: { MIN: 100, FEE_RATE: 0.05, DAILY_LIMIT: 200_000 },
 

@@ -37,6 +37,7 @@ async function end(guildId, { channelId } = {}) {
       .append({ guildId: key, category: 'season_champion', userId: ranked[0].userId, value: ranked[0].net, refId: `${key}:${closed.number}`, extra: { seasonNumber: closed.number } })
       .catch(console.error);
   }
+  await require('./clan').closeSeason(key, closed.number).catch(console.error);
   for (const r of ranked.slice(0, config.SEASON.TOP_TITLES)) {
     await profile.checkTrigger(r.userId, guildId, 'season', { seasonRank: r.rank }, channelId).catch(console.error);
   }

@@ -69,6 +69,7 @@ async function reward(userId, guildId, ch, channelId) {
     { $push: { storyRewards: ch.id }, $addToSet: { titles: ch.reward.title, ...(ch.reward.item ? { inventory: ch.reward.item } : {}) }, $inc: { rewardPoints: points } },
   );
   const first = res.modifiedCount === 1;
+  await require('./collection').grant(userId, `story:${ch.id}`, { source: `story:${ch.id}`, guildId, channelId }).catch(console.error);
   notifier.announce(
     guildId,
     channelId,

@@ -11,7 +11,8 @@ function register(name, fn) {
 
 async function summary(guildId, userId) {
   const parts = await Promise.all(providers.map((p) => p.fn(guildId, userId).catch(() => null)));
-  return { lines: parts.filter((x) => x?.line).map((x) => x.line), badges: parts.filter((x) => x?.badge).map((x) => x.badge) };
+  const clan = parts.find((x) => x?.clanTag);
+  return { lines: parts.filter((x) => x?.line).map((x) => x.line), badges: parts.filter((x) => x?.badge).map((x) => x.badge), clanTag: clan?.clanTag ?? null };
 }
 
 // ── 특별 규칙
@@ -33,6 +34,20 @@ register('hof', async (guildId, userId) => {
   const r = await require('./hallOfFame').ofUser(guildId, userId);
   if (!r.all.length) return null;
   return { line: `🏛️ 명예의 전당 현재 기록 ${r.current.length}개 · 누적 ${r.all.length}개`, badge: r.current.length ? { text: `전당 기록 ${r.current.length}`, tier: 'epic' } : null };
+});
+
+// ── 클랜
+register('clan', async (guildId, userId) => {
+  const b = await require('./clan').badgeOf(guildId, userId);
+  if (!b) return null;
+  const roles = require('../content/clan').ROLES;
+  return { line: `${b.clan.emblem} 클랜 **[${b.clan.tag}] ${b.clan.name}** Lv.${b.clan.level} · ${roles[b.role]?.label ?? b.role} · 기여 ${b.contribution.toLocaleString('en-US')}`, clanTag: b.clan.tag, clanName: b.clan.name };
+});
+// ── 월드 보스
+register('boss', async (guildId, userId) => {
+  const c = await require('./worldBoss').myContribution(guildId, userId);
+  if (!c?.contribution) return null;
+  return { line: `🐉 이번 월드 보스 기여 ${c.contribution.toLocaleString('en-US')}` };
 });
 
 module.exports = { register, summary };

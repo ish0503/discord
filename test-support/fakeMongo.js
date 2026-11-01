@@ -122,6 +122,13 @@ const UNIQUE = {
   HallOfFameRecord: [['recordId']],
   HallOfFameBest: [['guildId', 'category']],
   StoryProgress: [['guildId', 'userId']],
+  Clan: [['clanId'], { keys: ['guildId', 'nameKey'], where: { status: 'active' } }],
+  ClanMember: [['guildId', 'userId']],
+  ClanApplication: [{ keys: ['clanId', 'userId'], where: { status: 'pending' } }],
+  ClanPlayer: [['guildId', 'userId']],
+  WorldBoss: [['bossId'], { keys: ['guildId', 'status'], where: { status: 'active' } }],
+  BossContribution: [['bossId', 'userId']],
+  UserCollection: [['userId', 'itemId']],
 };
 
 let seq = 0;
@@ -154,8 +161,11 @@ function makeModel(name, defaults = () => ({})) {
     docs,
     reset: () => docs.splice(0),
     create: async (d) => {
-      for (const keys of UNIQUE[name] ?? []) {
-        if (docs.some((x) => keys.every((k) => getPath(x, k) !== undefined && eq(getPath(x, k), getPath(d, k))))) {
+      for (const spec of UNIQUE[name] ?? []) {
+        const keys = Array.isArray(spec) ? spec : spec.keys;
+        const where = Array.isArray(spec) ? null : spec.where; // 부분 고유 인덱스 (partialFilterExpression)
+        if (where && !matches(d, where)) continue;
+        if (docs.some((x) => (!where || matches(x, where)) && keys.every((k) => getPath(x, k) !== undefined && eq(getPath(x, k), getPath(d, k))))) {
           const e = new Error(`dup ${name} ${keys}`);
           e.code = 11000;
           throw e;
@@ -171,6 +181,17 @@ function makeModel(name, defaults = () => ({})) {
     countDocuments: async (filter) => docs.filter((d) => matches(d, filter)).length,
     distinct: async (field, filter) => [...new Set(docs.filter((d) => matches(d, filter)).map((d) => getPath(d, field)))],
     aggregate: async () => [],
+    deleteOne: async (filter) => {
+      const k = docs.findIndex((x) => matches(x, filter));
+      if (k < 0) return { deletedCount: 0 };
+      docs.splice(k, 1);
+      return { deletedCount: 1 };
+    },
+    deleteMany: async (filter) => {
+      let n = 0;
+      for (let k = docs.length - 1; k >= 0; k--) if (matches(docs[k], filter)) (docs.splice(k, 1), n++);
+      return { deletedCount: n };
+    },
     updateMany: async (filter, update) => {
       const hit = docs.filter((x) => matches(x, filter));
       hit.forEach((d) => applyUpdate(d, update, filter, false));

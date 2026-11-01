@@ -491,21 +491,35 @@ async function render(d) {
   const TW = 444;
   const best = achievements.showcase(owned, 3);
   const titleAch = eq.title ? achievements.byTitle[eq.title] : null;
-  const blocks = [eq.title ? 30 : 0, 44, best.length ? 28 : 0];
+  const blocks = [eq.title ? 30 : 0, 44, best.length || d.badges?.length ? 28 : 0];
   const gaps = blocks.filter(Boolean).length - 1;
   let y = 122 - (blocks.reduce((a, b) => a + b, 0) + gaps * 12) / 2;
   if (eq.title) {
     tierPill(ctx, eq.title, titleAch ? achievements.tierOf(titleAch) : null, TX, y, 30, { font: B(15), maxW: TW, accent: pal.accent });
     y += 30 + 12;
   }
-  text(ctx, d.name, TX, y + 38, { maxW: TW, fitFont: B, size: 42, min: 20 });
+  // 클랜 태그는 이름 앞 작은 배지로 (예: [FIRE])
+  let nameX = TX;
+  if (d.clanTag) {
+    ctx.font = B(15);
+    const tag = `[${d.clanTag}]`;
+    const tw2 = ctx.measureText(tag).width + 16;
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    roundRect(ctx, TX, y + 12, tw2, 28, 8);
+    ctx.fill();
+    text(ctx, tag, TX + 8, y + 32, { font: B(15), color: pal.accent });
+    nameX = TX + tw2 + 10;
+  }
+  text(ctx, d.name, nameX, y + 38, { maxW: TX + TW - nameX, fitFont: B, size: 42, min: 20 });
   y += 44 + 12;
-  if (best.length) {
+  // 대표 업적 + 시스템 배지(스토리 완주·전당 기록·랭크 등)를 한 줄에
+  const sysBadges = (d.badges || []).map((x) => ({ name: x.text, tier: achievements.TIERS[x.tier] ?? null }));
+  if (best.length || sysBadges.length) {
     let bx = TX;
-    for (const a of best) {
+    for (const a of [...best.map((x) => ({ name: x.name, tier: achievements.tierOf(x) })), ...sysBadges]) {
       const room = TX + TW - bx;
       if (room < 90) break;
-      bx += tierPill(ctx, a.name, achievements.tierOf(a), bx, y, 28, { font: B(13), maxW: Math.min(room, 200) }) + 8;
+      bx += tierPill(ctx, a.name, a.tier, bx, y, 28, { font: B(13), maxW: Math.min(room, 200), accent: pal.accent }) + 8;
     }
   }
 
