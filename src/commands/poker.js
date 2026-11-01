@@ -20,14 +20,15 @@ const blindsFor = (buyin) => {
   return { bb, sb: Math.max(1, Math.floor(bb / 2)) };
 };
 
-async function open(i, { buyin, bots, maxHumans }) {
+async function open(i, { buyin, bots, maxHumans, pr = null }) {
   if (bots + maxHumans > PK.MAX_SEATS) return i.reply(ephemeral(`봇 + 최대 인원은 ${PK.MAX_SEATS}명 이하여야 해요.`));
   if (bots + maxHumans < 2) return i.reply(ephemeral('봇이 0명이면 최대 인원을 2명 이상으로 정해 주세요.'));
   const { sb, bb } = blindsFor(buyin);
   return lobby.open(i, {
     prefix: PREFIX,
     game: 'poker',
-    title: '🎭 포커페이스 테이블 모집',
+    title: pr ? `🔒 비공개 방 「${pr.name}」 · 포커페이스` : '🎭 포커페이스 테이블 모집',
+    allow: pr ? (uid) => require('../services/privateRoom').allowFor(pr.roomId, uid) : null,
     info: () => [`바이인 **${chips(buyin)}** (= 시작 스택) · 블라인드 **${num(sb)}/${num(bb)}** · 노리밋 · 올인/사이드팟`, '한 핸드 승부 후 정산 · 끝나면 호스트가 같은 설정으로 다시 열 수 있어요'],
     maxHumans,
     bots,
@@ -37,11 +38,12 @@ async function open(i, { buyin, bots, maxHumans }) {
       const acc = await wallet.getAccount(uid, gid);
       return acc.money < buyin ? `바이인 ${chips(buyin)} 이상의 잔고가 필요해요. (현재 ${chips(acc.money)})` : null;
     },
-    onStart: (l) => start(l, { buyin, bots, maxHumans, sb, bb }),
+    onStart: (l) => start(l, { buyin, bots, maxHumans, sb, bb, pr }),
   });
 }
 
-async function start(l, { buyin, bots, maxHumans, sb, bb }) {
+async function start(l, { buyin, bots, maxHumans, sb, bb, pr }) {
+  if (pr) require('../services/privateRoom').recordGame(pr.roomId, l.id).catch(() => {});
   // 바이인 확보 (실패한 사람은 제외)
   const humans = [];
   for (const h of l.humans) {
@@ -77,14 +79,14 @@ async function start(l, { buyin, bots, maxHumans, sb, bb }) {
     autoSitOut: false,
     title: (r) => `🎭 포커페이스 · 블라인드 ${num(sb)}/${num(bb)} · ${r.hand?.streetName ?? ''}`,
     footer: () => `바이인 ${num(buyin)} · 노리밋 · 🔘 버튼 · 시간 초과 시 체크/다이`,
-    onHandEnd: (r, h) => finish(r, h, { l, buyin, bots, maxHumans }),
+    onHandEnd: (r, h) => finish(r, h, { l, buyin, bots, maxHumans, pr }),
     // 화면 편집은 로비 메시지 편집기(l.live)를 그대로 사용 → 공개 메시지에 응답한 최신 버튼 토큰만 l.ui에 반영
     onInteraction: (i) => (l.ui = i),
   });
   await room.playHand({ sb, bb, button: randomInt(0, seats.length) });
 }
 
-async function finish(room, h, { l, buyin, bots, maxHumans }) {
+async function finish(room, h, { l, buyin, bots, maxHumans, pr }) {
   gameState.transition(room.id, 'SETTLING');
   const lines = [];
   const tableTotal = room.startStacks.reduce((a, b) => a + b, 0);
@@ -110,6 +112,7 @@ async function finish(room, h, { l, buyin, bots, maxHumans }) {
         endReason: h.endReason,
         seats: h.seats.length,
         buyin,
+        roomId: pr?.roomId ?? null, // 비공개 방 판 (랭크·명예의 전당 제외, 전적에 🔒 표시)
         opponents: room.handSeats.filter((x) => x.type === 'human' && x.id !== seat.id).map((x) => x.id),
       },
     });
@@ -135,13 +138,14 @@ async function finish(room, h, { l, buyin, bots, maxHumans }) {
   for (const seat of room.handSeats) if (seat.type === 'human') sessions.end(seat.marker);
   gameState.transition(room.id, 'COMPLETED');
   room.close();
-  const again = new ActionRowBuilder().addComponents(
+  const again = pr ? null : new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`${PREFIX}:${l.hostId}:again:${buyin}.${bots}.${maxHumans}`).setLabel('같은 설정으로 새 테이블 (호스트)').setEmoji('🔁').setStyle(ButtonStyle.Primary),
   );
-  await room.live.final(room.render(room.potSummary(), { final: true, extraRows: [again], extraLines: lines })).catch(console.error);
+  await room.live.final(room.render(room.potSummary(), { final: true, extraRows: again ? [again] : [], extraLines: lines })).catch(console.error);
 }
 
 module.exports = {
+  open,
   prefix: PREFIX,
   game: 'poker',
   data: new SlashCommandBuilder()

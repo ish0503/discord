@@ -129,6 +129,9 @@ const UNIQUE = {
   WorldBoss: [['bossId'], { keys: ['guildId', 'status'], where: { status: 'active' } }],
   BossContribution: [['bossId', 'userId']],
   UserCollection: [['userId', 'itemId']],
+  RankProfile: [['guildId', 'userId', 'gameType', 'seasonKey']],
+  PrivateRoom: [['roomId']],
+  Prediction: [['tournamentId', 'userId', 'predictionType']],
 };
 
 let seq = 0;

@@ -32,6 +32,7 @@ async function start(guildId, userId) {
 }
 
 async function onSettled(ev, { eventId }) {
+  if (require('../games/registry').isMeta(ev.game)) return;
   const s = await StoryProgress.findOne({ guildId: ev.guildId, userId: ev.userId }).lean();
   if (!s?.chapterId) return; // 시작하지 않았으면 무관
   const mark = `story:${eventId}`;

@@ -34,7 +34,7 @@ cfg.CRASH.GROWTH_PER_MS=0.003;
 Object.assign(cfg.BLACKJACK,{DEALER_STEP_MS:1,BET_MS:200,TURN_MS:300,INSURANCE_MS:300,LOBBY_MS:200});
 Object.assign(cfg.BACCARAT,{DEAL_MS:1,BET_MS:200,LOBBY_MS:200});
 Object.assign(cfg.POKER,{BOT_THINK_MS:1,STREET_PAUSE_MS:1,TURN_MS:150,SIMULATIONS:30,LOBBY_MS:200});
-Object.assign(cfg.TOURNAMENT,{TURN_MS:60,HAND_PAUSE_MS:1,MAX_HANDS:6,HANDS_PER_LEVEL:2,LOBBY_MS:200});
+Object.assign(cfg.TOURNAMENT,{TURN_MS:60,HAND_PAUSE_MS:1,MAX_HANDS:6,HANDS_PER_LEVEL:2,LOBBY_MS:200}); cfg.PREDICTION.WINDOW_MS=1;
 const mongoose=require('mongoose'); const M=mongoose.models;
 const { loadCommands } = require(ROOT+'src/registerCommands');
 const cmds=Object.fromEntries(loadCommands().map(c=>[c.data.calls.find(x=>x[0]==='setName')[1][0], c]));
@@ -61,7 +61,7 @@ const noEscrow=()=>M.User.docs.every(d=>d.escrow.length===0);
 const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=customId.split(':'); return cmds[cmd].handleButton(mk(uid,opts,extra),{action,arg:rest.join(':')}); };
 
 (async()=>{
-  ok(Object.keys(cmds).length===26, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
+  ok(Object.keys(cmds).length===29, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
 
   step('슬롯 (연속 스핀·잭팟)');
   await cmds['슬롯'].execute(mk('A',{'금액':1000}));
@@ -168,6 +168,7 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   ok(tDesc.some(d=>d.includes('최종 순위')), '스레드에 최종 순위 공개');
   ok(desc(pub).includes('우승') && desc(pub).includes(threads[0].id), '원래 채널 현황판 → 결과 + 스레드 링크');
   ok(!eph.some(e=>e.includes('🂠 **보드**')), '테이블이 비공개 메시지로 바뀌지 않음');
+  ok(tDesc.some(d=>d.includes('예측이 마감')||d.includes('우승자 예측')), '토너먼트 예측 창 (첫 핸드 전) 공개');
 
   step('출석·미션·상점·인벤토리·프로필·전적·리플레이');
   await cmds['출석'].execute(mk('A')); await cmds['출석'].execute(mk('A'));
@@ -217,6 +218,20 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   await cmds['보스'].execute(mk(CO,sub('순위'))); ok(desc(pub).includes(CO), '보스 기여 순위');
   await cmds['보스'].execute(mk(CO,sub('기록'))); ok(desc(pub).includes('도감'), '보스 도감');
   await cmds['관리자'].execute(mk('ADMIN',{_sub:'보스종료'})); ok(desc(pub).includes('종료'), '보스 종료');
+
+  step('랭크 · 비공개 방 · 예측');
+  await cmds['랭크'].execute(mk('D',sub('프로필'))); ok(desc(pub).includes('등급'), '랭크 프로필');
+  await cmds['랭크'].execute(mk('D',sub('순위'))); ok(desc(pub).length>0, '랭크 순위');
+  const RO='100000000000000951', RG='100000000000000952';
+  await cmds['방'].execute(mk(RO,sub('만들기',{'이름':'친구방','게임':'poker','금액':5000,'봇':1,'최대인원':3})));
+  const codeLine=eph.at(-1); const code=(codeLine.match(/초대 코드: `([A-Z0-9]+)`/)||[])[1];
+  ok(!!code, '비공개 방 생성 (코드는 방장에게만)');
+  await cmds['방'].execute(mk(RG,sub('참가',{'코드':'WRONGCODE1'}))); ok(eph.at(-1).includes('맞는 방이 없어요'), '틀린 코드 거부');
+  await cmds['방'].execute(mk(RG,sub('참가',{'코드':code}))); ok(eph.at(-1).includes('들어왔어요'), '코드로 참가');
+  await cmds['방'].execute(mk(RG,sub('시작'))); ok(eph.at(-1).includes('방장만'), '방장만 시작');
+  await cmds['방'].execute(mk(RO,sub('정보'))); ok(eph.at(-1).includes('방 게임 기록'), '방 정보');
+  await cmds['예측'].execute(mk('A',sub('순위'))); ok(true, '예측 순위');
+  await cmds['예측'].execute(mk('A',sub('결과'))); ok(eph.at(-1).length>0, '예측 결과');
 
   step('관리자');
   const adm=(sub,opts={})=>cmds['관리자'].execute(mk('ADMIN',{_sub:sub,...opts}));

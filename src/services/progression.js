@@ -50,4 +50,30 @@ register('boss', async (guildId, userId) => {
   return { line: `🐉 이번 월드 보스 기여 ${c.contribution.toLocaleString('en-US')}` };
 });
 
+// ── 랭크
+register('rank', async (guildId, userId) => {
+  const p = await require('./rank').profileOf(guildId, userId);
+  const rank = require('../content/rank');
+  const played = p.current.filter((d) => d.games > 0);
+  if (!played.length) return null;
+  const best = played.sort((a, b) => b.rating - a.rating)[0];
+  const t = rank.TIERS[rank.tierIndex(best.tier)];
+  const tierMap = { bronze: 'common', silver: 'rare', gold: 'rare', platinum: 'epic', diamond: 'legendary' };
+  return { line: `🏅 랭크 ${played.map((d) => `${d.gameType === 'poker' ? '포커' : '토너먼트'} ${rank.TIERS[rank.tierIndex(d.tier)].emoji}${rank.TIERS[rank.tierIndex(d.tier)].name} ${d.rating}`).join(' · ')}`, badge: { text: `${t.name} 리그`, tier: tierMap[best.tier] } };
+});
+// ── 예측
+register('predict', async (guildId, userId) => {
+  const p = await require('./profile').get(userId);
+  if (!p.predict?.total) return null;
+  return { line: `🔮 예측 ${p.predict.score}점 · 적중 ${p.predict.correct}/${p.predict.total}` };
+});
+// ── 수집품 전시
+register('collection', async (guildId, userId) => {
+  const p = await require('./profile').get(userId);
+  const cat = require('../content/collection');
+  const shown = (p.showcase || []).map((id) => cat.byId[id]).filter(Boolean);
+  if (!shown.length) return null;
+  return { line: `🗃️ 전시 ${shown.map((x) => `${x.emoji} ${x.name}`).join(' · ')}` };
+});
+
 module.exports = { register, summary };

@@ -158,6 +158,7 @@ scheduler.register('clan-weekly', 3600_000, async () => {
   const clan = require('./src/services/clan');
   for (const g of await clan.guildsWithClans()) await clan.awardWeekly(g).catch((e) => console.error('[clan-weekly]', e.message));
 });
+scheduler.register('private-rooms', 10 * 60_000, () => require('./src/services/privateRoom').sweep());
 scheduler.register('transfer-recovery', 60_000, async () => {
   const r = await wallet.recoverTransfers();
   if (r.completed || r.failed) console.log(`💸 중단된 송금 복구: 완료 ${r.completed}, 취소 ${r.failed}`);

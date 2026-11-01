@@ -159,6 +159,7 @@ class PokerRoom {
     const h = this.hand;
     const uid = i.user.id;
     const mineIdx = this.handSeats?.findIndex((s) => s.type === 'human' && s.id === uid) ?? -1;
+    if (action === 'react') return this.onReact ? this.onReact(i, extra) : i.deferUpdate();
     if (action === 'hand') {
       if (mineIdx < 0) {
         const out = this.seats.some((s) => s.id === uid && s.stack <= 0);
@@ -381,7 +382,9 @@ class PokerRoom {
       .setTitle(this.title(this))
       .setDescription(desc.slice(0, 4096))
       .setFooter({ text: this.footer(this) });
-    return { embeds: [embed], components: final ? extraRows : this.actionRows() };
+    if (!final) this.lastPrompt = prompt;
+    const rows = final ? extraRows : [...this.actionRows(), ...(this.extraRows?.() ?? [])];
+    return { embeds: [embed], components: rows.slice(0, 5) };
   }
 
   /** 핸드 결과 요약 (팟별 승자) */

@@ -25,10 +25,14 @@ const GAMES = {
   },
   poker: { label: '포커페이스', emoji: '🎭', command: '포커페이스', designRTP: () => null },
   tournament: { label: '토너먼트', emoji: '🏆', command: '토너먼트', designRTP: () => null },
+  // 메타 항목: 게임이 아니라 관전자 예측 정산 (전적·미션·연승·클랜·스토리·랭크에는 넣지 않음)
+  prediction: { label: '예측', emoji: '🔮', command: null, meta: true, designRTP: () => null },
 };
 
-const ids = () => Object.keys(GAMES);
+const ids = () => Object.keys(GAMES).filter((id) => !GAMES[id].meta);
+/** 게임이 아닌 정산 항목 (예측 등) */
+const isMeta = (id) => !!GAMES[id]?.meta;
 const label = (id) => (GAMES[id] ? `${GAMES[id].emoji} ${GAMES[id].label}` : id);
 const byCommand = (name) => Object.entries(GAMES).find(([, g]) => g.command === name)?.[0] ?? null;
 
-module.exports = { GAMES, ids, label, byCommand, SLOT_RTP };
+module.exports = { GAMES, ids, isMeta, label, byCommand, SLOT_RTP };

@@ -299,6 +299,7 @@ async function rollPeriods(Model, filter, doc, wk, sk) {
 }
 
 async function onSettled(ev, { eventId }) {
+  if (require('../games/registry').isMeta(ev.game)) return;
   const m = await membership(ev.guildId, ev.userId);
   if (!m) return;
   const exp = rules.expFor(ev);

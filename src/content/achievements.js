@@ -39,6 +39,7 @@ const A = [
   { id: 'story_1', name: '이야기의 시작', desc: '스토리 1장 완료', rarity: 'common', title: '이야기꾼', points: 80, check: (c) => (c.profile.storyRewards?.length ?? 0) >= 1 },
   { id: 'clan_join', name: '소속감', desc: '클랜에 가입하거나 창설', rarity: 'common', title: '클랜원', points: 50, check: (c) => c.trigger === 'clan' },
   { id: 'boss_join', name: '토벌대 합류', desc: '월드 보스 토벌에 참여', rarity: 'common', title: '토벌대원', points: 80, check: (c) => c.trigger === 'boss' },
+  { id: 'predict_1', name: '예언자의 첫걸음', desc: '토너먼트 우승자 예측 첫 적중', rarity: 'common', title: '예언가 지망생', points: 60, check: (c) => (c.profile.predict?.correct ?? 0) >= 1 },
   { id: 'daily_7', name: '개근상', desc: '7일 연속 출석', rarity: 'common', title: '개근상', points: 150, check: (c) => c.trigger === 'daily' && c.dailyStreak >= 7 },
 
   // ───────── 🔵 희귀 ─────────
@@ -58,6 +59,8 @@ const A = [
   { id: 'clan_found', name: '창립자', desc: '클랜 창설', rarity: 'rare', title: '클랜 창립자', points: 200, check: (c) => c.trigger === 'clan' && c.clanRole === 'owner' },
   { id: 'boss_slay', name: '보스 슬레이어', desc: '월드 보스 처치 성공에 참여', rarity: 'rare', title: '보스 슬레이어', points: 300, check: (c) => c.trigger === 'boss' && c.bossDefeated === true },
   { id: 'collect_set', name: '수집가', desc: '수집 세트 하나 완성', rarity: 'rare', title: '세트 완성가', points: 250, check: (c) => (c.profile.collectionSets?.length ?? 0) >= 1 },
+  { id: 'rank_gold', name: '골드 리그', desc: '랭크 골드 등급 달성', rarity: 'rare', title: '골드 리거', points: 300, check: (c) => c.trigger === 'rank' && ['gold', 'platinum', 'diamond'].includes(c.rankTier) },
+  { id: 'predict_streak3', name: '꿰뚫어 보는 눈', desc: '예측 3연속 적중', rarity: 'rare', title: '통찰가', points: 300, check: (c) => (c.profile.predict?.bestStreak ?? 0) >= 3 },
   { id: 'points_5000', name: '포인트 수집가', desc: '보상 포인트 5,000P 보유', rarity: 'rare', title: '수집가', points: 200, check: (c) => c.profile.rewardPoints >= 5000 },
 
   // ───────── 🟣 영웅 ─────────
@@ -72,6 +75,8 @@ const A = [
   { id: 'story_all', name: '왕좌의 주인공', desc: '스토리 모든 챕터 완료', rarity: 'epic', title: '전설의 주인공', points: 800, check: (c) => (c.profile.storyRewards?.length ?? 0) >= 4 },
   { id: 'clan_lv5', name: '명문 클랜', desc: '레벨 5 이상 클랜의 멤버', rarity: 'epic', title: '명문가', points: 500, check: (c) => c.trigger === 'clan' && c.clanLevel >= 5 },
   { id: 'boss_mvp', name: '토벌 MVP', desc: '월드 보스 기여도 1위', rarity: 'epic', title: '토벌 영웅', points: 700, check: (c) => c.trigger === 'boss' && c.bossTop === true },
+  { id: 'rank_plat_season', name: '플래티넘 시즌', desc: '시즌을 플래티넘 이상으로 마감', rarity: 'epic', title: '플래티넘 시즌', points: 800, check: (c) => c.trigger === 'rankSeason' && ['platinum', 'diamond'].includes(c.rankTier) },
+  { id: 'predict_10', name: '예언자', desc: '예측 10번 적중', rarity: 'epic', title: '카지노 예언자', points: 700, check: (c) => (c.profile.predict?.correct ?? 0) >= 10 },
   { id: 'daily_30', name: '한 달 개근', desc: '30일 연속 출석', rarity: 'epic', title: '성실의 아이콘', points: 600, check: (c) => c.trigger === 'daily' && c.dailyStreak >= 30 },
 
   // ───────── 🟡 전설 ─────────
@@ -82,6 +87,7 @@ const A = [
   { id: 'tourney_crown', name: '왕좌', desc: '사람 4명 이상 토너먼트 우승', rarity: 'legendary', title: '왕좌의 주인', points: 1200, check: (c) => c.ev?.game === 'tournament' && c.ev.detail?.place === 1 && c.ev.detail?.humans >= 4 },
   { id: 'clan_season', name: '시즌 최강 클랜', desc: '시즌 1위 클랜의 멤버 (3일 이상 소속)', rarity: 'legendary', title: '최강 클랜의 일원', points: 1500, check: (c) => c.trigger === 'clanSeason' },
   { id: 'collect_all', name: '박물관장', desc: '수집 세트 4개 완성', rarity: 'legendary', title: '박물관장', points: 2000, check: (c) => (c.profile.collectionSets?.length ?? 0) >= 4 },
+  { id: 'rank_diamond', name: '다이아몬드 리그', desc: '랭크 다이아몬드 등급 달성', rarity: 'legendary', title: '다이아몬드', points: 2000, check: (c) => c.trigger === 'rank' && c.rankTier === 'diamond' },
   { id: 'season_top', name: '시즌 정상', desc: '시즌 랭킹 3위 이내 마감', rarity: 'legendary', title: '시즌 챔피언', points: 1200, check: (c) => c.trigger === 'season' && c.seasonRank <= 3 },
   { id: 'games_10000', name: '카지노의 주인', desc: '총 10,000판 플레이', rarity: 'legendary', title: '카지노의 주인', points: 2000, check: (c) => c.profile.totals.games >= 10000 },
 

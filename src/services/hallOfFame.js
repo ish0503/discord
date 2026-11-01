@@ -69,6 +69,7 @@ async function append({ guildId, category, userId, value = 0, refId, extra = {} 
 
 async function onSettled(ev, { eventId }) {
   if (!ev.guildId || ev.status !== 'settled') return;
+  if (require('../games/registry').isMeta(ev.game) || ev.detail?.roomId) return; // 예측·비공개 방 판은 기록 제외
   const base = { gameId: ev.gameId ?? null, roundId: ev.roundId, game: ev.game };
   const news = [];
   const tryBest = async (category, value) => {

@@ -81,6 +81,7 @@ const points = (n) => `${n.toLocaleString('en-US')}P`;
  * 복구(재시작) 정산도 같은 경로로 들어와 전적·미션·업적에 반영된다.
  */
 async function onRoundSettled(ev, meta = {}) {
+  if (require('../games/registry').isMeta(ev.game)) return { applied: false }; // 예측 정산은 전적·미션에 넣지 않음
   const eventId = meta.eventId ?? `settle:${ev.roundId}`;
   const win = ev.net > 0;
   const lose = ev.net < 0;

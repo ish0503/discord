@@ -28,6 +28,7 @@ async function roll(userId, day) {
 }
 
 async function onSettled(ev, { eventId }) {
+  if (require('../games/registry').isMeta(ev.game)) return;
   const day = time.dayKey(new Date(ev.at ?? Date.now()));
   if (day !== time.dayKey()) return; // 지난 날의 이벤트가 늦게 처리되면 오늘 규칙에는 반영하지 않음
   const rule = rules.forDay(day);

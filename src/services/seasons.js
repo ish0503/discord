@@ -38,6 +38,7 @@ async function end(guildId, { channelId } = {}) {
       .catch(console.error);
   }
   await require('./clan').closeSeason(key, closed.number).catch(console.error);
+  await require('./rank').closeSeason(key, closed.number).catch(console.error);
   for (const r of ranked.slice(0, config.SEASON.TOP_TITLES)) {
     await profile.checkTrigger(r.userId, guildId, 'season', { seasonRank: r.rank }, channelId).catch(console.error);
   }

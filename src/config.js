@@ -19,7 +19,7 @@ module.exports = {
     // 'guild' = 서버마다 독립 지갑 / 'global' = 모든 서버에서 하나의 지갑
     SCOPE: env.ECONOMY_SCOPE === 'global' ? 'global' : 'guild',
     ESCROW_TTL_MS: 20 * 60_000, // 이 시간 넘게 결과가 없는 판은 환불
-    ESCROW_TTL_BY_GAME: { tournament: 3 * 60 * 60_000, poker: 60 * 60_000 }, // 오래 걸리는 게임은 따로
+    ESCROW_TTL_BY_GAME: { tournament: 3 * 60 * 60_000, poker: 60 * 60_000, prediction: 4 * 60 * 60_000 }, // 오래 걸리는 게임은 따로
     ESCROW_SWEEP_MS: 60_000,
     // 단일 인스턴스 운영 전제: 부팅 시 이전 프로세스의 판을 즉시 복구 (결과 확정 → 정산, 미확정 → 환불)
     RECOVER_ON_BOOT: env.RECOVER_ON_BOOT !== 'false',
@@ -76,6 +76,15 @@ module.exports = {
     MIN_GAMES_FOR_CHIPS: 5, // 칩 보상 자격: 이 서버에서 실제 플레이한 판 수
     MIN_CONTRIBUTION: 30, // 보상 자격 최소 기여도
   },
+
+  // 토너먼트 예측 (관전자끼리 나눠 갖는 패리뮤추얼, 하우스 몫 없음)
+  PREDICTION: { WINDOW_MS: 45_000, STAKES: [0, 1_000, 5_000], SCORE_CORRECT: 10, SCORE_STREAK_BONUS: 5 },
+
+  // 비공개 게임방
+  ROOM: { CODE_LENGTH: 10, TTL_MS: 24 * 3600_000, MAX_OPEN_PER_OWNER: 2, JOIN_FAIL_LIMIT: 5, JOIN_FAIL_WINDOW_MS: 10 * 60_000 },
+
+  // 관전자 반응 (게임 결과와 무관)
+  REACTIONS: { EMOJIS: ['👏', '🔥', '😱', '🤣'], COOLDOWN_MS: 8_000, HIGHLIGHT_EVERY_HANDS: 2 },
 
   // /송금: 수수료는 소각 (부계정 칩 몰아주기 억제), 하루 한도는 보낸 금액+수수료 기준 (KST 자정 초기화)
   TRANSFER: { MIN: 100, FEE_RATE: 0.05, DAILY_LIMIT: 200_000 },

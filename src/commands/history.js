@@ -12,7 +12,7 @@ async function render(userId, guildId, page, game) {
   const lines = h.items.map((l) => {
     const t = `<t:${Math.floor(new Date(l.createdAt).getTime() / 1000)}:R>`;
     const tag = l.status === 'refunded' ? '↩️ 환불' : l.net > 0 ? '🟢' : l.net < 0 ? '🔴' : '⚪';
-    return `${tag} ${registry.label(l.game)} 베팅 ${num(l.staked)} → ${num(l.payout)} **${netText(l.net)}**${l.recovered ? ' 🔧복구' : ''} · ${t}\n　\`${l.roundId.slice(0, 8)}\``;
+    return `${tag} ${registry.label(l.game)} 베팅 ${num(l.staked)} → ${num(l.payout)} **${netText(l.net)}**${l.recovered ? ' 🔧복구' : ''}${l.detail?.roomId ? ' 🔒비공개 방' : ''} · ${t}\n　\`${l.roundId.slice(0, 8)}\``;
   });
   const embed = new EmbedBuilder()
     .setColor(COLOR.info)

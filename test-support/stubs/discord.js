@@ -3,4 +3,4 @@ class B { constructor(){ return chain(this.constructor.name); } }
 class SlashCommandBuilder extends B{} class EmbedBuilder extends B{} class ButtonBuilder extends B{} class ActionRowBuilder extends B{} class StringSelectMenuBuilder extends B{}
 class AttachmentBuilder { constructor(data,o={}){ this.data=data; this.name=o.name; } }
 class REST { setToken(){return this} async put(){return []} }
-module.exports={AttachmentBuilder,SlashCommandBuilder,EmbedBuilder,ButtonBuilder,ActionRowBuilder,StringSelectMenuBuilder,REST,Routes:{applicationCommands:()=>'',applicationGuildCommands:()=>''},ButtonStyle:{Primary:1,Secondary:2,Success:3,Danger:4},MessageFlags:{Ephemeral:64},PermissionFlagsBits:{ManageGuild:32n}};
+module.exports={ChannelType:{PublicThread:11,PrivateThread:12},AttachmentBuilder,SlashCommandBuilder,EmbedBuilder,ButtonBuilder,ActionRowBuilder,StringSelectMenuBuilder,REST,Routes:{applicationCommands:()=>'',applicationGuildCommands:()=>''},ButtonStyle:{Primary:1,Secondary:2,Success:3,Danger:4},MessageFlags:{Ephemeral:64},PermissionFlagsBits:{ManageGuild:32n}};

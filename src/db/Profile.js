@@ -36,6 +36,14 @@ const profileSchema = new Schema(
     storyRewards: { type: [String], default: [] }, // 보상 받은 스토리 챕터 (서버가 달라도 1회)
     collectionSets: { type: [String], default: [] }, // 보상 받은 수집 세트
     showcase: { type: [String], default: [] }, // 프로필에 전시할 수집품 (최대 3)
+    predict: {
+      score: { type: Number, default: 0 },
+      correct: { type: Number, default: 0 },
+      total: { type: Number, default: 0 },
+      streak: { type: Number, default: 0 },
+      bestStreak: { type: Number, default: 0 },
+    },
+    predictProcessed: { type: [String], default: [] }, // 채점한 예측 (멱등)
     // 처리한 정산 이벤트 id (최근 300개) — Outbox 재처리 시 전적·미션 중복 반영 방지
     processedEvents: { type: [String], default: [] },
     winStreak: { type: Number, default: 0 },

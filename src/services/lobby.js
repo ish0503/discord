@@ -41,9 +41,11 @@ function render(l, note = '', { closed = false } = {}) {
 const seats = (l) => l.humans.length + l.spec.bots;
 
 /**
- * @param spec { prefix, game, sessionScope?, busyText?, title, info(l)→string[], maxHumans, bots, minSeats, lobbyMs, entryCheck(userId, guildId)→사유|null, onStart(l) }
+ * @param spec { prefix, game, sessionScope?, busyText?, allow(userId)→거절 사유|null (비공개 방), title, info(l)→string[], maxHumans, bots, minSeats, lobbyMs, entryCheck(userId, guildId)→사유|null, onStart(l) }
  */
 async function open(i, spec) {
+  const denied = spec.allow ? await spec.allow(i.user.id) : null;
+  if (denied) return i.reply(ephemeral(denied));
   const marker = sessions.start(i.user.id, spec.game, {}, { persistent: true, scope: spec.sessionScope });
   if (!marker) return i.reply(ephemeral(spec.busyText ?? busyText));
   await i.deferReply();
@@ -99,6 +101,8 @@ async function handleButton(i, action, lobbyId) {
   if (action === 'join') {
     if (l.humans.some((h) => h.id === uid)) return i.reply(ephemeral('이미 참가했어요.'));
     if (l.humans.length >= l.spec.maxHumans) return i.reply(ephemeral('자리가 꽉 찼어요.'));
+    const denied = l.spec.allow ? await l.spec.allow(uid) : null; // 비공개 방: 멤버만
+    if (denied) return i.reply(ephemeral(denied));
     const marker = sessions.start(uid, l.spec.game, {}, { persistent: true, scope: l.spec.sessionScope });
     if (!marker) return i.reply(ephemeral(l.spec.busyText ?? busyText));
     await i.deferReply({ flags: MessageFlags.Ephemeral });

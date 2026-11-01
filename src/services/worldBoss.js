@@ -108,7 +108,7 @@ async function hit(boss, dmg) {
 
 /** 평소 게임 → 지원 피해 (하루 상한, 이벤트당 1회) */
 async function onSettled(ev, { eventId }) {
-  if (ev.status !== 'settled') return;
+  if (ev.status !== 'settled' || require('../games/registry').isMeta(ev.game)) return;
   const boss = await active(ev.guildId);
   if (!boss || Date.now() > new Date(boss.endsAt).getTime()) return;
   const dmg = bosses.passiveDamage(ev);
