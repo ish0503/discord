@@ -13,17 +13,21 @@ class SessionManager {
     this.sweeper.unref();
   }
 
-  get(userId) {
-    return this.sessions.get(userId);
+  get(userId, scope = null) {
+    return this.sessions.get(scope ? `${scope}:${userId}` : userId);
   }
 
   /** 새 세션. 이미 진행 중인 게임이 있으면 null */
   /**
    * @param opts.persistent true면 장기 세션 강제 종료(sweep) 대상에서 제외 — 여러 판 이어지는 테이블 참가 마커용
+   * @param opts.scope 별도 슬롯 이름 (예: 'tournament'). 스레드에서 따로 진행되는 토너먼트는 채널 게임과 슬롯을 나눠
+   *                   토너먼트 중에도 채널에서 다른 게임을 할 수 있게 한다. (칩은 에스크로라 이중 사용 불가)
    */
-  start(userId, game, data = {}, { idleMs = config.SESSION_IDLE_MS, onTimeout = null, persistent = false } = {}) {
-    if (this.sessions.has(userId)) return null;
+  start(userId, game, data = {}, { idleMs = config.SESSION_IDLE_MS, onTimeout = null, persistent = false, scope = null } = {}) {
+    const key = scope ? `${scope}:${userId}` : userId;
+    if (this.sessions.has(key)) return null;
     const session = {
+      key,
       userId,
       game,
       startedAt: Date.now(),
@@ -36,7 +40,7 @@ class SessionManager {
       persistent,
       ...data,
     };
-    this.sessions.set(userId, session);
+    this.sessions.set(key, session);
     this.touch(session);
     return session;
   }
@@ -70,7 +74,8 @@ class SessionManager {
     } catch (e) {
       console.error('[session cleanup]', e);
     }
-    if (this.sessions.get(session.userId) === session) this.sessions.delete(session.userId);
+    const key = session.key ?? session.userId;
+    if (this.sessions.get(key) === session) this.sessions.delete(key);
   }
 
   #sweep() {

@@ -1,18 +1,26 @@
 {
   "name": "discord-casino-bot",
-  "version": "1.0.0",
-  "description": "디스코드 인터랙티브 가상 카지노 봇 (discord.js v14 + MongoDB)",
+  "version": "2.0.0",
+  "description": "디스코드 인터랙티브 가상 카지노 봇 (discord.js v14 + MongoDB) — 에스크로 정산·장애 복구·관리자·통계·업적·토너먼트",
   "main": "index.js",
   "private": true,
   "scripts": {
     "start": "node index.js",
     "deploy": "node deploy-commands.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "e2e": "node test-support/e2e.js",
+    "check": "npm test && npm run e2e && npm run test:integration",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "migrate": "node scripts/migrate-v2.js",
+    "test:integration": "node --test test/integration/*.itest.js",
+    "migrate:v3": "node scripts/migrate-v3.js"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@napi-rs/canvas": "~1.0.11",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "mongoose": "^8.8.0"

@@ -1,0 +1,43 @@
+# 매일 MongoDB 백업 + "실제로 복원되는지" 자동 검증
+#  1) 운영 DB(MONGODB_URI 시크릿) 백업 → 체크섬·문서 수 검증
+#  2) 임시 MongoDB 컨테이너에 복원 → 컬렉션별 문서 수 대조 (복구 리허설)
+#  3) 백업 파일을 Actions 아티팩트로 14일 보관
+# ⚠️ 아티팩트에는 유저 데이터가 들어 있습니다. 반드시 private 저장소에서만 사용하세요.
+name: backup
+
+on:
+  schedule:
+    - cron: '0 18 * * *' # 매일 03:00 KST
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - id: backup
+        name: 백업 + 무결성 검사
+        run: node scripts/backup.js --out backups
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      - name: 복원 리허설 (임시 DB)
+        run: node scripts/restore.js "${{ steps.backup.outputs.dir }}" --apply --uri mongodb://localhost:27017/restore_test --yes --drop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mongodb-backup-${{ github.run_id }}
+          path: ${{ steps.backup.outputs.dir }}
+          retention-days: 14
+      - name: 실패 알림
+        if: failure() && env.ALERT_WEBHOOK_URL != ''
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          curl -s -H "Content-Type: application/json" -d '{"content":"🚨 카지노 봇 DB 백업/복원 리허설 실패: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' "$ALERT_WEBHOOK_URL"

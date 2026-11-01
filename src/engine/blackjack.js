@@ -30,10 +30,10 @@ function dealerShouldHit(cards, hitSoft17 = false) {
 }
 
 /** 정산: net = 유저 순손익 */
-function settle(player, dealer, bet, blackjackPays = 1.5) {
+function settle(player, dealer, bet, blackjackPays = 1.5, { noBlackjack = false } = {}) {
   const p = handValue(player).total;
   const d = handValue(dealer).total;
-  const pBJ = isBlackjack(player);
+  const pBJ = !noBlackjack && isBlackjack(player); // 스플릿 후 A+10은 블랙잭이 아닌 21
   const dBJ = isBlackjack(dealer);
 
   if (pBJ && dBJ) return { outcome: 'push', net: 0, label: '🤝 둘 다 블랙잭 — 푸시' };

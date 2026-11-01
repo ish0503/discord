@@ -1,0 +1,35 @@
+# main 브랜치 push·PR마다 엔진 테스트 실행.
+# 저장소 Settings → Branches → Branch protection에서 이 체크를 필수로 지정하면
+# 테스트가 실패한 코드는 main에 병합되지 않고, 따라서 Koyeb 자동 배포도 일어나지 않는다.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # 실제 MongoDB로 경제 핵심(원자성·고유 인덱스·동시성)을 검증하는 통합 테스트용
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run e2e
+      - run: npm run test:integration
+        env:
+          MONGODB_TEST_URI: mongodb://localhost:27017

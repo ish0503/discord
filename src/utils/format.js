@@ -15,9 +15,12 @@ const signed = (n, digits = 0) => `${n > 0 ? '+' : ''}${Number(n).toFixed(digits
 const netText = (n) => (n > 0 ? `+${num(n)}` : n < 0 ? `-${num(-n)}` : '±0');
 const netColor = (n) => (n > 0 ? COLOR.win : n < 0 ? COLOR.lose : COLOR.push);
 
-const cardText = (c) => `${c.rank}${c.suit}`;
-const handText = (cards, hidden = []) =>
-  cards.map((c, i) => (hidden.includes(i) ? '`🂠`' : `\`${cardText(c)}\``)).join(' ');
+const { card: themedCard, cardMarkup } = require('../content/cosmetics');
+
+const cardText = (c, theme = 'classic') => themedCard(c, theme);
+/** 카드 목록 표기. theme = 카드 테마(꾸미기 아이템) — 테마마다 표기 방식이 다름 */
+const handText = (cards, hidden = [], theme = 'classic') =>
+  cards.map((c, i) => (hidden.includes(i) ? '`🂠`' : cardMarkup(c, theme))).join(' ');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ephemeral = (content) => ({ content, flags: MessageFlags.Ephemeral });
