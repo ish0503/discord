@@ -61,7 +61,7 @@ const noEscrow=()=>M.User.docs.every(d=>d.escrow.length===0);
 const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=customId.split(':'); return cmds[cmd].handleButton(mk(uid,opts,extra),{action,arg:rest.join(':')}); };
 
 (async()=>{
-  ok(Object.keys(cmds).length===21, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
+  ok(Object.keys(cmds).length===24, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
 
   step('슬롯 (연속 스핀·잭팟)');
   await cmds['슬롯'].execute(mk('A',{'금액':1000}));
@@ -192,6 +192,15 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   await cmds['분석'].execute(mk('A')); ok(eph.at(-1).includes('분석') || eph.at(-1).length>0, '분석');
   await cmds['랭킹'].execute(mk('A',{'종류':'balance'})); ok(desc(pub).includes('<@'), '잔고 랭킹');
   await cmds['잔고'].execute(mk('A')); ok(true, '잔고');
+
+  step('특별 규칙 · 스토리 · 명예의 전당');
+  await cmds['특별규칙'].execute(mk('A')); ok(desc(pub).includes('내일 규칙 미리보기'), '특별 규칙 (오늘·내일 공개)');
+  const sub=(name,opts={})=>({...opts,_sub:name});
+  await cmds['스토리'].execute(mk('A',sub('시작'))); ok(desc(pub).includes('목표'), '스토리 시작');
+  await cmds['스토리'].execute(mk('A',sub('진행'))); ok(eph.at(-1).includes('▶️'), '스토리 진행');
+  await cmds['스토리'].execute(mk('A',sub('지도'))); ok(desc(pub).includes('1장'), '스토리 지도');
+  await cmds['명예의전당'].execute(mk('A',sub('목록'))); ok(desc(pub).includes('현재 최고 기록'), '명예의 전당 목록');
+  await cmds['명예의전당'].execute(mk('A',sub('기록'))); ok(desc(pub).includes('보유 기록'), '명예의 전당 개인 기록');
 
   step('관리자');
   const adm=(sub,opts={})=>cmds['관리자'].execute(mk('ADMIN',{_sub:sub,...opts}));

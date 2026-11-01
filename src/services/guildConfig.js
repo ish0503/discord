@@ -56,4 +56,13 @@ async function isAdmin(interaction) {
   return Boolean(doc.adminRoleId && roleIds.includes(doc.adminRoleId));
 }
 
-module.exports = { get, update, gameBlockReason, betLimits, betBlockReason, isAdmin };
+/** 서버 알림 빈도 설정에 따라 보낼지 (importance: 'normal' | 'important') */
+async function shouldNotify(guildId, importance = 'normal') {
+  if (!guildId) return false;
+  const level = (await get(guildId).catch(() => null))?.notifyLevel ?? 'all';
+  if (level === 'off') return false;
+  if (level === 'important') return importance === 'important';
+  return true;
+}
+
+module.exports = { shouldNotify, get, update, gameBlockReason, betLimits, betBlockReason, isAdmin };

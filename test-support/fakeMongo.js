@@ -119,6 +119,9 @@ const UNIQUE = {
   SettlementRecord: [['settlementId']],
   TransferQuota: [['economyKey', 'userId', 'day']],
   Ledger: [['refId', 'userId']],
+  HallOfFameRecord: [['recordId']],
+  HallOfFameBest: [['guildId', 'category']],
+  StoryProgress: [['guildId', 'userId']],
 };
 
 let seq = 0;

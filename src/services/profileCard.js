@@ -214,6 +214,22 @@ function frame(ctx, id, pal) {
       ctx.closePath();
       ctx.fill();
     }
+  } else if (id === 'legend') {
+    // 스토리 최종 보상: 무지개빛 이중 테두리 + 네 귀퉁이 왕관
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    ['#ff3d6e', '#ffb300', '#ffe66d', '#3ddc97', '#4cc3ff', '#9b4dff'].forEach((c, k, a) => g.addColorStop(k / (a.length - 1), c));
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 7;
+    ctx.shadowColor = 'rgba(255,214,90,0.6)';
+    ctx.shadowBlur = 16;
+    roundRect(ctx, x, y, w, h, 26);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    roundRect(ctx, x + 9, y + 9, w - 18, h - 18, 20);
+    ctx.stroke();
+    for (const [cx, cy] of [[x + 4, y + 4], [x + w - 4, y + 4], [x + 4, y + h - 4], [x + w - 4, y + h - 4]]) crown(ctx, cx, cy, 26, '#ffd54a');
   } else if (id === 'diamond') {
     const g = ctx.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, '#b9f6ff');
@@ -277,7 +293,7 @@ function avatar(ctx, img, name, cx, cy, r, pal, frameId) {
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
-  ctx.fillStyle = frameId === 'crown' ? '#ffcf40' : pal.accent;
+  ctx.fillStyle = frameId === 'crown' || frameId === 'legend' ? '#ffcf40' : pal.accent;
   ctx.fill();
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -293,7 +309,7 @@ function avatar(ctx, img, name, cx, cy, r, pal, frameId) {
     ctx.fillText([...(name || '?')][0], cx, cy + 4);
   }
   ctx.restore();
-  if (frameId === 'crown') crown(ctx, cx, cy - r - 6, 54, '#ffcf40'); // 아바타 테두리에 얹힌 왕관 (카드 외곽선과 겹치지 않게)
+  if (frameId === 'crown' || frameId === 'legend') crown(ctx, cx, cy - r - 6, 54, '#ffcf40'); // 아바타 테두리에 얹힌 왕관 (카드 외곽선과 겹치지 않게)
 }
 
 /** 카드 한 장 (테마 색·표기 반영) */

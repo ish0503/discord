@@ -16,7 +16,7 @@ async function render(userId) {
   for (const t of p.titles) options.push({ label: `${eq.title === t ? '✅ ' : ''}칭호 「${t}」`.slice(0, 100), value: `title|${t}`.slice(0, 100) });
   // 꾸미기 (기본값 + 보유 아이템)
   for (const type of Object.keys(cosmetics.CATALOG)) {
-    const owned = [cosmetics.DEFAULTS[type], ...cosmetics.SHOP.filter((it) => it.type === type && p.inventory.includes(it.id)).map((it) => it.value)];
+    const owned = [cosmetics.DEFAULTS[type], ...cosmetics.ownableItems().filter((it) => it.type === type && p.inventory.includes(it.id)).map((it) => it.value)];
     for (const v of owned) options.push({ label: `${eq[type] === v ? '✅ ' : ''}${cosmetics.TYPE_LABEL[type]} · ${cosmetics.CATALOG[type][v].name}`.slice(0, 100), value: `${type}|${v}` });
   }
   const show = (type) => cosmetics.CATALOG[type][eq[type]]?.name ?? eq[type];

@@ -35,6 +35,8 @@ const A = [
   { id: 'crash_2x', name: '이륙', desc: '그래프 2배 이상에서 탈출', rarity: 'common', title: '파일럿', points: 40, check: (c) => c.ev?.game === 'crash' && c.ev.detail?.cashedAt >= 2 },
   { id: 'bac_natural', name: '내추럴 나인', desc: '바카라 내추럴 판에서 이기기', rarity: 'common', title: '내추럴 나인', points: 50, check: (c) => won(c, 'baccarat') && c.ev.detail?.natural },
   { id: 'tourney_play', name: '토너먼트 데뷔', desc: '토너먼트 완주', rarity: 'common', title: '도전자', points: 50, check: (c) => c.ev?.game === 'tournament' },
+  { id: 'rule_1', name: '규칙 수호자', desc: '오늘의 특별 규칙 처음 완수', rarity: 'common', title: '규칙 수호자', points: 60, check: (c) => (c.profile.ruleCompletions ?? 0) >= 1 },
+  { id: 'story_1', name: '이야기의 시작', desc: '스토리 1장 완료', rarity: 'common', title: '이야기꾼', points: 80, check: (c) => (c.profile.storyRewards?.length ?? 0) >= 1 },
   { id: 'daily_7', name: '개근상', desc: '7일 연속 출석', rarity: 'common', title: '개근상', points: 150, check: (c) => c.trigger === 'daily' && c.dailyStreak >= 7 },
 
   // ───────── 🔵 희귀 ─────────
@@ -49,6 +51,8 @@ const A = [
   { id: 'crash_10x', name: '로켓 탑승', desc: '그래프 10배 이상에서 탈출', rarity: 'rare', title: '로켓맨', points: 150, check: (c) => c.ev?.game === 'crash' && c.ev.detail?.cashedAt >= 10 },
   { id: 'bac_tie', name: '무승부의 미학', desc: '바카라 타이 적중', rarity: 'rare', title: '균형주의자', points: 120, check: (c) => won(c, 'baccarat') && c.ev.detail?.side === 'tie' },
   { id: 'tourney_itm', name: '입상', desc: '사람 3명 이상 토너먼트에서 3위 이내', rarity: 'rare', title: '시상대', points: 200, check: (c) => c.ev?.game === 'tournament' && c.ev.detail?.humans >= 3 && c.ev.detail?.place <= 3 },
+  { id: 'rule_7', name: '규칙의 달인', desc: '특별 규칙 7번 완수', rarity: 'rare', title: '규칙의 달인', points: 250, check: (c) => (c.profile.ruleCompletions ?? 0) >= 7 },
+  { id: 'hof_entry', name: '전당 입성', desc: '이 서버 명예의 전당에 기록 남기기', rarity: 'rare', title: '전당의 얼굴', points: 200, check: (c) => c.trigger === 'hof' },
   { id: 'points_5000', name: '포인트 수집가', desc: '보상 포인트 5,000P 보유', rarity: 'rare', title: '수집가', points: 200, check: (c) => c.profile.rewardPoints >= 5000 },
 
   // ───────── 🟣 영웅 ─────────
@@ -59,6 +63,8 @@ const A = [
   { id: 'crash_50x', name: '성층권', desc: '그래프 50배 이상에서 탈출', rarity: 'epic', title: '성층권 비행사', points: 400, check: (c) => c.ev?.game === 'crash' && c.ev.detail?.cashedAt >= 50 },
   { id: 'tourney_win', name: '챔피언', desc: '토너먼트 우승', rarity: 'epic', title: '챔피언', points: 500, check: (c) => c.ev?.game === 'tournament' && c.ev.detail?.place === 1 },
   { id: 'high_roller_10m', name: '큰손 중의 큰손', desc: '누적 베팅 10,000,000칩', rarity: 'epic', title: '큰손 중의 큰손', points: 700, check: (c) => c.profile.totals.wagered >= 10_000_000 },
+  { id: 'rule_30', name: '규칙의 지배자', desc: '특별 규칙 30번 완수', rarity: 'epic', title: '규칙의 지배자', points: 700, check: (c) => (c.profile.ruleCompletions ?? 0) >= 30 },
+  { id: 'story_all', name: '왕좌의 주인공', desc: '스토리 모든 챕터 완료', rarity: 'epic', title: '전설의 주인공', points: 800, check: (c) => (c.profile.storyRewards?.length ?? 0) >= 4 },
   { id: 'daily_30', name: '한 달 개근', desc: '30일 연속 출석', rarity: 'epic', title: '성실의 아이콘', points: 600, check: (c) => c.trigger === 'daily' && c.dailyStreak >= 30 },
 
   // ───────── 🟡 전설 ─────────

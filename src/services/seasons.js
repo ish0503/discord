@@ -31,6 +31,12 @@ async function end(guildId, { channelId } = {}) {
   const ranked = results.map((r, k) => ({ userId: r._id, net: r.net, games: r.games, rank: k + 1 }));
   const closed = await Season.findOneAndUpdate({ _id: s._id, endedAt: null }, { $set: { endedAt: new Date(), results: ranked } }, { new: true }).lean();
   if (!closed) return null; // 이미 다른 곳에서 종료
+  // 명예의 전당: 시즌 우승자 (지운 적 없는 누적 이력)
+  if (ranked[0]) {
+    await require('./hallOfFame')
+      .append({ guildId: key, category: 'season_champion', userId: ranked[0].userId, value: ranked[0].net, refId: `${key}:${closed.number}`, extra: { seasonNumber: closed.number } })
+      .catch(console.error);
+  }
   for (const r of ranked.slice(0, config.SEASON.TOP_TITLES)) {
     await profile.checkTrigger(r.userId, guildId, 'season', { seasonRank: r.rank }, channelId).catch(console.error);
   }

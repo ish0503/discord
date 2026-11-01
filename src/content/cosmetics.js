@@ -63,6 +63,7 @@ const FRAMES = {
   crown: { name: '왕관', l: '👑 ', r: ' 👑' },
   fire: { name: '불꽃', l: '🔥 ', r: ' 🔥' },
   diamond: { name: '다이아', l: '💎 ', r: ' 💎' },
+  legend: { name: '전설의 왕좌', l: '⟪👑 ', r: ' 👑⟫' }, // 스토리 최종 챕터 보상 (판매 안 함)
 };
 
 const SHOP = [
@@ -87,6 +88,9 @@ const SHOP = [
   { id: 'title:큰손', type: 'title', value: '큰손', price: { chips: 500_000 } },
 ];
 
+/** 판매하지 않는 보상 아이템 (스토리·보스·수집 세트 등으로만 획득). 장착 가능 여부는 inventory로 판단 */
+const REWARD_ITEMS = [{ id: 'reward:frame:legend', type: 'frame', value: 'legend', source: '스토리 4장 완료' }];
+
 const TYPE_LABEL = { cardTheme: '🃏 카드 테마', slotTheme: '🎰 슬롯 테마', diceSkin: '🎲 주사위 스킨', color: '🎨 색상', frame: '🖼️ 프로필 테두리', title: '🏷️ 칭호' };
 const DEFAULTS = { cardTheme: 'classic', slotTheme: 'fruit', diceSkin: 'classic', color: 'default', frame: 'none' };
 const CATALOG = { cardTheme: CARD_THEMES, slotTheme: SLOT_THEMES, diceSkin: DICE_SKINS, color: COLORS, frame: FRAMES };
@@ -106,4 +110,7 @@ const diceFace = (n, skin = 'classic') => (DICE_SKINS[skin] ?? DICE_SKINS.classi
 const color = (id, fallback) => COLORS[id]?.hex ?? fallback;
 const framed = (text, frame = 'none') => `${(FRAMES[frame] ?? FRAMES.none).l}${text}${(FRAMES[frame] ?? FRAMES.none).r}`;
 
-module.exports = { SHOP, CATALOG, TYPE_LABEL, DEFAULTS, CARD_THEMES, itemName, card, cardMarkup, cardTheme, slotSymbol, diceFace, color, framed };
+/** 장착 가능한 아이템 정의 (상점 + 보상) */
+const ownableItems = () => [...SHOP, ...REWARD_ITEMS];
+
+module.exports = { SHOP, REWARD_ITEMS, ownableItems, CATALOG, TYPE_LABEL, DEFAULTS, CARD_THEMES, itemName, card, cardMarkup, cardTheme, slotSymbol, diceFace, color, framed };

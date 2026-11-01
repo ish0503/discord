@@ -63,12 +63,12 @@ async function unlock(userId, guildId, list, channelId) {
     if (tier.rank >= 2) {
       // 영웅 이상: 등급 색 임베드로 크게 알림
       const head = tier.rank >= 4 ? '🔴✨ 신화 업적 달성! ✨🔴' : tier.rank >= 3 ? '🟡✨ 전설 업적 달성! ✨🟡' : '🟣 영웅 업적 달성!';
-      notifier.send(channelId, {
+      notifier.announce(guildId, channelId, {
         content: `<@${userId}>`,
         embeds: [{ color: parseInt(tier.color[0].slice(1), 16), title: head, description: lines.join('\n') }],
         allowedMentions: { parse: [] },
-      });
-    } else notifier.send(channelId, `🏆 <@${userId}> 업적 달성!\n${lines.join('\n')}`);
+      }, 'important');
+    } else notifier.announce(guildId, channelId, `🏆 <@${userId}> 업적 달성!\n${lines.join('\n')}`);
   }
   return got;
 }
@@ -177,7 +177,7 @@ async function equip(userId, type, value) {
   if (type === 'title') {
     if (value !== null && !p.titles.includes(value)) return { ok: false, reason: '보유하지 않은 칭호예요.' };
   } else if (value !== cosmetics.DEFAULTS[type]) {
-    const item = cosmetics.SHOP.find((i) => i.type === type && i.value === value);
+    const item = cosmetics.ownableItems().find((i) => i.type === type && i.value === value);
     if (!item || !p.inventory.includes(item.id)) return { ok: false, reason: '보유하지 않은 아이템이에요.' };
   }
   await Profile.updateOne({ userId }, { $set: { [`equipped.${type}`]: value } });

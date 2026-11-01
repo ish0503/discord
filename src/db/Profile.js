@@ -21,6 +21,19 @@ const profileSchema = new Schema(
       wins: { type: Number, default: 0 },
       wagered: { type: Number, default: 0 },
     },
+    // 오늘의 특별 규칙 진행 (v = 낙관적 동시성 버전)
+    dailyRule: {
+      key: { type: String, default: null },
+      ruleId: { type: String, default: null },
+      progress: { type: Number, default: 0 },
+      streak: { type: Number, default: 0 },
+      games: { type: [String], default: [] },
+      completed: { type: Boolean, default: false },
+      v: { type: Number, default: 0 },
+    },
+    ruleHistory: { type: [{ key: String, ruleId: String, progress: Number, completed: Boolean, _id: false }], default: [] },
+    ruleCompletions: { type: Number, default: 0 },
+    storyRewards: { type: [String], default: [] }, // 보상 받은 스토리 챕터 (서버가 달라도 1회)
     // 처리한 정산 이벤트 id (최근 300개) — Outbox 재처리 시 전적·미션 중복 반영 방지
     processedEvents: { type: [String], default: [] },
     winStreak: { type: Number, default: 0 },

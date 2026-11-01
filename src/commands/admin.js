@@ -261,6 +261,22 @@ const handlers = {
     return `🔒 대시보드 세션 ${n}개를 폐기했어요. 토큰을 바꾸려면 DASHBOARD_TOKEN을 새 값으로 바꾸고 재시작하세요 (이전 토큰 세션은 자동 무효).`;
   },
 
+  async 알림(i) {
+    const level = i.options.getString('빈도', true);
+    const before = (await guildConfig.get(i.guildId)).notifyLevel ?? 'all';
+    await guildConfig.update(i.guildId, { $set: { notifyLevel: level } });
+    await audit(i, 'config.notifyLevel', { before, after: level });
+    return `🔔 채널 알림 빈도: **${{ all: '모두', important: '중요한 것만 (영웅 이상 업적·기록 경신·보스·챕터 완료)', off: '끄기' }[level]}**`;
+  },
+
+  async 기록익명화(i) {
+    const u = i.options.getUser('유저', true);
+    const reason = i.options.getString('사유', true).trim();
+    const n = await require('../services/hallOfFame').anonymize(i.guildId, u.id);
+    await audit(i, 'hof.anonymize', { targetId: u.id, amount: n, reason });
+    return `🕶️ <@${u.id}> 의 명예의 전당 기록 ${n}건을 익명 처리했어요 (수치·날짜는 보존). 사유: ${reason}`;
+  },
+
   async 관리자역할(i) {
     const role = i.options.getRole('역할');
     await guildConfig.update(i.guildId, { $set: { adminRoleId: role?.id ?? null } });
@@ -310,6 +326,15 @@ const data = new SlashCommandBuilder()
   .addSubcommand((s) => s.setName('이벤트종료').setDescription('진행 중 이벤트 모두 종료'))
   .addSubcommand((s) => s.setName('정산상태').setDescription('Outbox·다인 정산·보류된 판·주기 작업 상태').addBooleanOption((o) => o.setName('재시도').setDescription('실패·포기한 Outbox 이벤트를 다시 처리')))
   .addSubcommand((s) => s.setName('대시보드세션폐기').setDescription('웹 대시보드 로그인 세션 모두 폐기'))
+  .addSubcommand((s) =>
+    s.setName('알림').setDescription('채널 알림 빈도 (업적·기록·스토리·보스)')
+      .addStringOption((o) => o.setName('빈도').setDescription('빈도').setRequired(true).addChoices({ name: '모두', value: 'all' }, { name: '중요한 것만', value: 'important' }, { name: '끄기', value: 'off' })),
+  )
+  .addSubcommand((s) =>
+    s.setName('기록익명화').setDescription('개인정보 요청: 명예의 전당 기록에서 사용자 식별 정보 제거')
+      .addUserOption((o) => o.setName('유저').setDescription('대상').setRequired(true))
+      .addStringOption((o) => o.setName('사유').setDescription('사유 (필수)').setRequired(true).setMinLength(2).setMaxLength(200)),
+  )
   .addSubcommand((s) => s.setName('관리자역할').setDescription('관리자 역할 지정 (비우면 해제)').addRoleOption((o) => o.setName('역할').setDescription('역할')));
 
 module.exports = {

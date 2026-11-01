@@ -29,4 +29,11 @@ async function editMessage(channelId, messageId, payload) {
   }
 }
 
-module.exports = { setClient, send, editMessage, get client() { return client; } };
+/** 서버 알림 빈도 설정을 따르는 채널 알림 */
+async function announce(guildId, channelId, payload, importance = 'normal') {
+  const guildConfig = require('./guildConfig'); // 순환 참조 방지 (지연 로딩)
+  if (!channelId || !(await guildConfig.shouldNotify(guildId, importance))) return null;
+  return send(channelId, payload);
+}
+
+module.exports = { announce, setClient, send, editMessage, get client() { return client; } };

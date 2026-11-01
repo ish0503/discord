@@ -8,6 +8,7 @@ const profile = require('../services/profile');
 const stats = require('../services/stats');
 const events = require('../services/events');
 const profileCard = require('../services/profileCard');
+const progression = require('../services/progression');
 const registry = require('../games/registry');
 const achievements = require('../content/achievements');
 const cosmetics = require('../content/cosmetics');
@@ -55,13 +56,20 @@ module.exports = {
   async execute(i) {
     const user = i.options.getUser('유저') ?? i.user;
     await i.deferReply();
-    const [p, acc, summary, active] = await Promise.all([profile.get(user.id), wallet.getAccount(user.id, i.guildId), stats.userSummary(user.id, i.guildId), events.active(i.guildId)]);
+    const [p, acc, summary, active, extras] = await Promise.all([
+      profile.get(user.id),
+      wallet.getAccount(user.id, i.guildId),
+      stats.userSummary(user.id, i.guildId),
+      events.active(i.guildId),
+      progression.summary(i.guildId, user.id).catch(() => null),
+    ]);
     const eq = { ...cosmetics.DEFAULTS, ...p.equipped };
     const member = user.id === i.user.id ? i.member : null;
     const name = member?.displayName ?? user.globalName ?? user.displayName ?? user.username;
     const best = achievements.showcase(p.achievements, 3);
     const extra = [
       best.length ? `🏅 대표 업적: ${best.map((a) => `${achievements.RARITY[a.rarity]} **${achievements.display(a)}**`).join(' · ')}` : '',
+      ...(extras?.lines ?? []),
       active.length ? `🎉 진행 중 이벤트: ${active.map((e) => `${e.name} (포인트 ×${e.multiplier})`).join(', ')}` : '',
     ].filter(Boolean);
 
@@ -80,6 +88,7 @@ module.exports = {
           achievementCount: p.achievements?.length ?? 0,
           achievements: p.achievements || [],
           games: summary,
+          badges: extras?.badges ?? [],
           rank: await balanceRank(i.guildId, acc.money),
         });
         const file = new AttachmentBuilder(png, { name: 'profile.png' });
