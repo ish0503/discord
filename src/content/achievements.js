@@ -40,6 +40,7 @@ const A = [
   { id: 'clan_join', name: '소속감', desc: '클랜에 가입하거나 창설', rarity: 'common', title: '클랜원', points: 50, check: (c) => c.trigger === 'clan' },
   { id: 'boss_join', name: '토벌대 합류', desc: '월드 보스 토벌에 참여', rarity: 'common', title: '토벌대원', points: 80, check: (c) => c.trigger === 'boss' },
   { id: 'predict_1', name: '예언자의 첫걸음', desc: '토너먼트 우승자 예측 첫 적중', rarity: 'common', title: '예언가 지망생', points: 60, check: (c) => (c.profile.predict?.correct ?? 0) >= 1 },
+  { id: 'rival_first', name: '숙명의 상대', desc: '라이벌 맺기', rarity: 'common', title: '라이벌', points: 50, check: (c) => c.trigger === 'rival' },
   { id: 'daily_7', name: '개근상', desc: '7일 연속 출석', rarity: 'common', title: '개근상', points: 150, check: (c) => c.trigger === 'daily' && c.dailyStreak >= 7 },
 
   // ───────── 🔵 희귀 ─────────
@@ -61,6 +62,7 @@ const A = [
   { id: 'collect_set', name: '수집가', desc: '수집 세트 하나 완성', rarity: 'rare', title: '세트 완성가', points: 250, check: (c) => (c.profile.collectionSets?.length ?? 0) >= 1 },
   { id: 'rank_gold', name: '골드 리그', desc: '랭크 골드 등급 달성', rarity: 'rare', title: '골드 리거', points: 300, check: (c) => c.trigger === 'rank' && ['gold', 'platinum', 'diamond'].includes(c.rankTier) },
   { id: 'predict_streak3', name: '꿰뚫어 보는 눈', desc: '예측 3연속 적중', rarity: 'rare', title: '통찰가', points: 300, check: (c) => (c.profile.predict?.bestStreak ?? 0) >= 3 },
+  { id: 'rival_10', name: '라이벌 킬러', desc: '라이벌과의 맞대결 10승', rarity: 'rare', title: '라이벌 킬러', points: 300, check: (c) => c.trigger === 'rival' && (c.rivalWins ?? 0) >= 10 },
   { id: 'points_5000', name: '포인트 수집가', desc: '보상 포인트 5,000P 보유', rarity: 'rare', title: '수집가', points: 200, check: (c) => c.profile.rewardPoints >= 5000 },
 
   // ───────── 🟣 영웅 ─────────
@@ -77,6 +79,7 @@ const A = [
   { id: 'boss_mvp', name: '토벌 MVP', desc: '월드 보스 기여도 1위', rarity: 'epic', title: '토벌 영웅', points: 700, check: (c) => c.trigger === 'boss' && c.bossTop === true },
   { id: 'rank_plat_season', name: '플래티넘 시즌', desc: '시즌을 플래티넘 이상으로 마감', rarity: 'epic', title: '플래티넘 시즌', points: 800, check: (c) => c.trigger === 'rankSeason' && ['platinum', 'diamond'].includes(c.rankTier) },
   { id: 'predict_10', name: '예언자', desc: '예측 10번 적중', rarity: 'epic', title: '카지노 예언자', points: 700, check: (c) => (c.profile.predict?.correct ?? 0) >= 10 },
+  { id: 'rival_streak5', name: '압도', desc: '한 라이벌에게 5연승', rarity: 'epic', title: '천적', points: 600, check: (c) => c.trigger === 'rival' && (c.rivalStreak ?? 0) >= 5 },
   { id: 'daily_30', name: '한 달 개근', desc: '30일 연속 출석', rarity: 'epic', title: '성실의 아이콘', points: 600, check: (c) => c.trigger === 'daily' && c.dailyStreak >= 30 },
 
   // ───────── 🟡 전설 ─────────

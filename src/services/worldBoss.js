@@ -86,6 +86,7 @@ async function attack({ guildId, userId }) {
   const clan = await require('./clan').membership(guildId, userId).catch(() => null);
   await BossContribution.updateOne({ bossId: boss.bossId, userId }, { $inc: { contribution: dmg }, $set: { clanId: clan?.clanId ?? null, updatedAt: new Date() } });
   const after = await hit(boss, dmg);
+  await profile.bumpMission(userId, 'boss_attack').catch(() => {});
   const c = await BossContribution.findOne({ bossId: boss.bossId, userId }).lean();
   return { ok: true, boss: after ?? boss, def: bosses.byId[boss.defId], roll, dmg, crit, left: B.DAILY_ATTEMPTS - c.attemptsToday, contribution: c.contribution };
 }

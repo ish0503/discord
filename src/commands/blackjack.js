@@ -4,6 +4,7 @@
  */
 const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
+const dealer = require('../content/dealerLines');
 const wallet = require('../services/wallet');
 const settlement = require('../services/settlement');
 const gameState = require('../services/gameState');
@@ -274,7 +275,10 @@ async function settle(t, r) {
     }),
   );
   t.round = null;
-  await mgr.afterRound(t, [dealerLine(r), ...lines].join('\n'));
+  // 딜러 대사 (연출만)
+  const dealerTotal = require('../engine/blackjack').handValue(r.dealer).total;
+  const talk = r.dealerBlackjack ? dealer.pick('bjDealerBlackjack', t.roundNo ?? lines.length) : dealerTotal > 21 ? dealer.pick('bjDealerBust', lines.length) : res.hands.some((h) => h.outcome === 'blackjack') ? dealer.pick('bjPlayerBlackjack', lines.length) : '';
+  await mgr.afterRound(t, [dealerLine(r), ...lines, talk].filter(Boolean).join('\n'));
 }
 
 module.exports = {

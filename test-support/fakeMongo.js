@@ -132,6 +132,8 @@ const UNIQUE = {
   RankProfile: [['guildId', 'userId', 'gameType', 'seasonKey']],
   PrivateRoom: [['roomId']],
   Prediction: [['tournamentId', 'userId', 'predictionType']],
+  Rivalry: [['guildId', 'pairKey']],
+  RivalMatch: [['guildId', 'gameId', 'pairKey']],
 };
 
 let seq = 0;

@@ -120,6 +120,20 @@ async function checkTrigger(userId, guildId, trigger, extra = {}, channelId) {
   return unlock(userId, guildId, unlocked, channelId);
 }
 
+/**
+ * 활동형 미션 진행 (특별 규칙 완수·보스 공격·클랜 기여·스토리 단계·예측 참여).
+ * 호출하는 쪽이 이미 "한 번만" 일어나는 지점(조건부 업데이트 성공 직후)에서 부른다.
+ */
+async function bumpMission(userId, metric, n = 1) {
+  let p = await rollMissions(await get(userId));
+  const { daily, weekly } = currentMissions();
+  const inc = {};
+  for (const m of daily) if (m.metric === metric) inc[`missions.daily.${m.id}`] = n;
+  for (const m of weekly) if (m.metric === metric) inc[`missions.weekly.${m.id}`] = n;
+  if (Object.keys(inc).length) p = await Profile.findOneAndUpdate({ userId }, { $inc: inc }, { new: true }).lean();
+  return p;
+}
+
 async function addPoints(userId, amount) {
   return Profile.findOneAndUpdate({ userId }, { $inc: { rewardPoints: amount } }, { new: true, upsert: true, setDefaultsOnInsert: true }).lean();
 }
@@ -187,4 +201,4 @@ async function equip(userId, type, value) {
 
 outbox.register('round.settled', 'profile', (payload, ev) => onRoundSettled(payload, { eventId: ev.eventId }));
 
-module.exports = { get, cosmeticsOf, currentMissions, rollMissions, claimMission, checkTrigger, addPoints, purchase, equip, onRoundSettled };
+module.exports = { bumpMission, get, cosmeticsOf, currentMissions, rollMissions, claimMission, checkTrigger, addPoints, purchase, equip, onRoundSettled };

@@ -54,8 +54,24 @@ async function maybeComplete(userId, day, rule, ev) {
   ).lean();
   if (!done) return false;
   notifier.announce(ev.guildId, ev.recovered ? null : ev.channelId, { content: `🎯 <@${userId}> 오늘의 특별 규칙 **「${rule.name}」** 완수! ⭐ +${points}P`, allowedMentions: { parse: [] } });
+  await seasonLimited(userId, done, ev);
+  await profile.bumpMission(userId, 'rule_complete').catch(() => {});
   await profile.checkTrigger(userId, ev.guildId, 'rule', {}, ev.recovered ? null : ev.channelId);
   return true;
+}
+
+/**
+ * 시즌 한정 수집품: 기간 중 특별 규칙을 LIMITED_RULES 번 완수하면 지급 (기간·조건은 /수집 상세 에 공개)
+ * 기간 안의 완수 수 = 이력(ruleHistory) 중 기간 안 완수 + 오늘 완수
+ */
+const LIMITED_RULES = 3;
+async function seasonLimited(userId, p, ev) {
+  const catalog = require('../content/collection');
+  for (const item of catalog.ITEMS.filter((x) => x.set === 'season' && catalog.obtainable(x))) {
+    const inWindow = (key) => key >= item.limited.from && key <= item.limited.until;
+    const n = (p.ruleHistory || []).filter((h) => h.completed && inWindow(h.key)).length + (p.dailyRule?.completed && inWindow(p.dailyRule.key) ? 1 : 0);
+    if (n >= LIMITED_RULES) await require('./collection').grant(userId, item.id, { source: `rule:${item.limited.label}`, guildId: ev.guildId, seasonKey: item.limited.label }).catch(() => {});
+  }
 }
 
 /** 화면용: 오늘·내일 규칙과 내 진행 */

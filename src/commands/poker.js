@@ -141,6 +141,9 @@ async function finish(room, h, { l, buyin, bots, maxHumans, pr }) {
   const again = pr ? null : new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`${PREFIX}:${l.hostId}:again:${buyin}.${bots}.${maxHumans}`).setLabel('같은 설정으로 새 테이블 (호스트)').setEmoji('🔁').setStyle(ButtonStyle.Primary),
   );
+  const dealer = require('../content/dealerLines');
+  if (h.results.some((x) => x.hand?.name === '로열 스트레이트 플러시')) lines.push(dealer.pick('royal'));
+  else if (room.allIns.size) lines.push(dealer.pick('allin', h.pot));
   await room.live.final(room.render(room.potSummary(), { final: true, extraRows: again ? [again] : [], extraLines: lines })).catch(console.error);
 }
 

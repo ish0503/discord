@@ -53,6 +53,7 @@ async function onSettled(ev, { eventId }) {
   if (!r.ok) return;
   const channel = ev.recovered ? null : ev.channelId;
   if (r.noop) return reconcile(ev.guildId, ev.userId); // 재시도: 완료 기록은 됐는데 보상 전에 멈췄다면 마저 지급
+  if (r.out.stageDone) await profile.bumpMission(ev.userId, 'story_stage').catch(() => {});
   if (r.out.chapterDone) await reward(ev.userId, ev.guildId, r.ch, channel);
   else if (r.out.stageDone) {
     const next = r.ch.stages[r.out.state.stage];

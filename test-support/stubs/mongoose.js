@@ -3,7 +3,7 @@ class Schema { constructor(d,o){this.d=d} index(){} }
 Schema.Types = { Mixed: 'Mixed' };
 const D = {
   User: () => ({ money: 10000, escrow: [], stats: {}, diceLossStreak: 0, lastBailoutAt: null, lastDailyKey: null, dailyStreak: 0, outbox: [], txLog: [] }),
-  Profile: () => ({ rewardPoints: 0, achievements: [], titles: [], inventory: [], equipped: { title: null, cardTheme: 'classic', slotTheme: 'fruit', diceSkin: 'classic', color: 'default', frame: 'none' }, totals: { games: 0, wins: 0, wagered: 0 }, processedEvents: [], dailyRule: { key: null, ruleId: null, progress: 0, streak: 0, games: [], completed: false, v: 0 }, ruleHistory: [], ruleCompletions: 0, storyRewards: [], collectionSets: [], showcase: [], predict: { score: 0, correct: 0, total: 0, streak: 0, bestStreak: 0 }, predictProcessed: [], winStreak: 0, maxWinStreak: 0, missions: { dailyKey: null, daily: {}, dailyClaimed: [], weeklyKey: null, weekly: {}, weeklyClaimed: [] } }),
+  Profile: () => ({ rewardPoints: 0, achievements: [], titles: [], inventory: [], equipped: { title: null, cardTheme: 'classic', slotTheme: 'fruit', diceSkin: 'classic', color: 'default', frame: 'none' }, totals: { games: 0, wins: 0, wagered: 0 }, processedEvents: [], dailyRule: { key: null, ruleId: null, progress: 0, streak: 0, games: [], completed: false, v: 0 }, ruleHistory: [], ruleCompletions: 0, storyRewards: [], collectionSets: [], showcase: [], predict: { score: 0, correct: 0, total: 0, streak: 0, bestStreak: 0 }, predictProcessed: [], rivalWeekly: 0, winStreak: 0, maxWinStreak: 0, missions: { dailyKey: null, daily: {}, dailyClaimed: [], weeklyKey: null, weekly: {}, weeklyClaimed: [] } }),
   GuildConfig: () => ({ adminRoleId: null, disabledGames: [], betLimits: {}, maintenance: { on: false, message: '' } }),
   GameState: () => ({ state: 'CREATED', players: [], history: [] }),
   Season: () => ({ endedAt: null, results: [] }),
@@ -24,6 +24,8 @@ const D = {
   RankProfile: () => ({ rating: 1000, peakRating: 1000, tier: 'bronze', peakTier: 'bronze', wins: 0, losses: 0, games: 0, weekly: { key: null, delta: 0 }, pairs: {}, recent: [], processed: [], closed: false, v: 0 }),
   PrivateRoom: () => ({ approval: false, spectators: true, settings: {}, members: [], invited: [], pending: [], threadId: null, channelId: null, failedJoins: 0, status: 'open', games: [] }),
   Prediction: () => ({ predictionType: 'winner', stake: 0, roundId: null, status: 'open', payout: 0, score: 0 }),
+  Rivalry: () => ({ status: 'pending', aWins: 0, bWins: 0, draws: 0, streakHolder: null, streak: 0, bestStreak: {}, weekly: {}, weeklyClaimed: [], v: 0 }),
+  RivalMatch: () => ({ results: {}, applied: false, isPrivate: false }),
   SettlementRecord: () => ({ participants: [], totals: {}, status: 'committed', issues: [] }),
 };
 const models = {};

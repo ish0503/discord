@@ -319,6 +319,7 @@ async function onSettled(ev, { eventId }) {
     };
   });
   const grant = r.noop ? (r.doc.grants || []).find((g) => g.eventId === eventId) : { clanId: m.clanId, exp: r.give };
+  if (!r.noop) await profile.bumpMission(ev.userId, 'clan_plays').catch(() => {}); // 상한에 걸려도 플레이 횟수는 셈
   if (!grant?.exp) return;
 
   // ② 클랜 경험치 (주간·시즌 포함)

@@ -61,7 +61,7 @@ const noEscrow=()=>M.User.docs.every(d=>d.escrow.length===0);
 const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=customId.split(':'); return cmds[cmd].handleButton(mk(uid,opts,extra),{action,arg:rest.join(':')}); };
 
 (async()=>{
-  ok(Object.keys(cmds).length===29, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
+  ok(Object.keys(cmds).length===31, `명령어 ${Object.keys(cmds).length}개 로드: ${Object.keys(cmds).join(' ')}`);
 
   step('슬롯 (연속 스핀·잭팟)');
   await cmds['슬롯'].execute(mk('A',{'금액':1000}));
@@ -232,6 +232,15 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   await cmds['방'].execute(mk(RO,sub('정보'))); ok(eph.at(-1).includes('방 게임 기록'), '방 정보');
   await cmds['예측'].execute(mk('A',sub('순위'))); ok(true, '예측 순위');
   await cmds['예측'].execute(mk('A',sub('결과'))); ok(eph.at(-1).length>0, '예측 결과');
+
+  step('라이벌 · 수집');
+  await cmds['라이벌'].execute(mk(RO,sub('신청',{'유저':{id:RG}}))); ok(desc(pub).includes('라이벌을 신청'), '라이벌 신청 (상대 1회 알림)');
+  await cmds['라이벌'].execute(mk(RG,sub('수락',{'유저':{id:RO}}))); ok(desc(pub).includes('라이벌 성립'), '라이벌 수락');
+  await cmds['라이벌'].execute(mk(RO,sub('정보'))); ok(desc(pub).includes('승'), '라이벌 정보');
+  await cmds['라이벌'].execute(mk(RO,sub('도전'))); ok(desc(pub).includes('이번 주'), '라이벌 주간 도전');
+  await cmds['수집'].execute(mk('A',sub('목록'))); ok(desc(pub).includes('보스 도감'), '수집 도감');
+  await cmds['수집'].execute(mk('A',sub('상세',{'아이템':'season:2026w'}))); ok(eph.at(-1).includes('한정'), '기간 한정 아이템 조건 공개');
+  await cmds['수집'].execute(mk('A',sub('전시',{'첫째':'boss:dragon'}))); ok(eph.at(-1).includes('보유하지 않은'), '없는 수집품 전시 차단');
 
   step('관리자');
   const adm=(sub,opts={})=>cmds['관리자'].execute(mk('ADMIN',{_sub:sub,...opts}));

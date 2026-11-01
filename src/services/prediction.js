@@ -60,6 +60,7 @@ async function submit({ tournamentId, guildId, userId, seatId, stake }) {
   } else {
     try {
       await Prediction.create({ guildId, tournamentId, userId, predictionType: 'winner', predictedResult: seat.id, predictedName: seat.name, stake, roundId, status: 'open', submittedAt: new Date(), lockedAt });
+      await profile.bumpMission(userId, 'predict').catch(() => {}); // 대회당 첫 제출만 (교체는 안 셈)
     } catch (err) {
       if (roundId) await wallet.refund({ userId, guildId, roundId, reason: 'prediction-dup' });
       if (err.code === 11000) return fail('잠시 후 다시 시도해 주세요.');

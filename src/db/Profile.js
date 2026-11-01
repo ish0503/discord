@@ -44,6 +44,7 @@ const profileSchema = new Schema(
       bestStreak: { type: Number, default: 0 },
     },
     predictProcessed: { type: [String], default: [] }, // 채점한 예측 (멱등)
+    rivalWeekly: { type: Number, default: 0 }, // 라이벌 주간 도전 달성 횟수
     // 처리한 정산 이벤트 id (최근 300개) — Outbox 재처리 시 전적·미션 중복 반영 방지
     processedEvents: { type: [String], default: [] },
     winStreak: { type: Number, default: 0 },

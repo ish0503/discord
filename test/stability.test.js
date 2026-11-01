@@ -425,3 +425,16 @@ test('관리자 명령어: 권한 없는 사용자는 실행 불가, 다른 서�
   await admin.execute(mk({ perm: true, sub: '복구', 게임id: 'other-guild-game' }));
   assert.match(replies.at(-1).content, /이 서버의 게임 ID가 아니에요/);
 });
+
+test('정산 검증: 정산 직전에 추가 베팅으로 에스크로 금액이 바뀌면 바뀐 금액으로 다시 검증·정산', async () => {
+  const u = uid(22);
+  await wallet.getAccount(u, G);
+  const r = await wallet.reserve(u, G, 'blackjack', 1000);
+  // settle 이 에스크로를 읽은 직후 addStake 가 끼어드는 경합
+  const [st] = await Promise.all([wallet.settle({ userId: u, guildId: G, roundId: r.roundId, payout: 0, game: 'blackjack' }), wallet.addStake(u, G, r.roundId, 1000)]);
+  assert.equal(st.ok, true);
+  const log = M.GameLog.docs.find((l) => l.roundId === r.roundId);
+  assert.equal(log.staked, money(u) === 8000 ? 2000 : 1000, '기록된 베팅액 = 실제로 묶여 있던 금액');
+  assert.equal(M.User.docs.find((d) => d.userId === u).escrow.length, 0, '에스크로 정리');
+  assert.equal(money(u) + log.staked, 10_000, '칩 보존 (잃은 금액 = 기록된 베팅액)');
+});
