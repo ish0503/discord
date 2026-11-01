@@ -14,6 +14,7 @@ const rateLimit = require('./src/services/rateLimit');
 const seasons = require('./src/services/seasons');
 const notifier = require('./src/services/notifier');
 const dashboard = require('./src/services/dashboard');
+const keepAlive = require('./src/services/keepAlive');
 const { alert } = require('./src/services/alerts');
 require('./src/services/profile'); // round:settled → 전적·미션·업적 리스너 등록
 
@@ -178,6 +179,8 @@ process.on('uncaughtException', async (err) => {
   setInterval(sweepEscrow, config.ECONOMY.ESCROW_SWEEP_MS).unref();
   setInterval(heartbeat, 30_000).unref();
   setInterval(() => seasons.autoRollover().catch((e) => console.error('[season]', e)), 3600_000).unref();
+  // Koyeb 등 scale-to-zero 호스팅에서 잠들지 않도록 공개 URL로 주기적 핑 (src/services/keepAlive.js)
+  keepAlive.start({ onFail: (streak, err) => streak >= 3 && alert('warn', 'keep-alive 핑 연속 실패', `${streak}회 · ${err.message} — 인스턴스가 잠들 수 있어요`) });
   await heartbeat();
   await client.login(DISCORD_TOKEN);
 })().catch(async (err) => {
