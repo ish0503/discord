@@ -15,6 +15,9 @@ const seasons = require('./src/services/seasons');
 const notifier = require('./src/services/notifier');
 const dashboard = require('./src/services/dashboard');
 const keepAlive = require('./src/services/keepAlive');
+const outbox = require('./src/services/outbox');
+const scheduler = require('./src/services/scheduler');
+const instanceLock = require('./src/services/instanceLock');
 const { alert } = require('./src/services/alerts');
 require('./src/services/profile'); // round:settled → 전적·미션·업적 리스너 등록
 
@@ -112,7 +115,11 @@ const server = http
       }),
     );
   })
-  .listen(port, () => console.log(`🩺 헬스 체크 :${port}${config.DASHBOARD.TOKEN ? ' · 📊 /dashboard 활성' : ''}`));
+  .listen(port, () => {
+    const d = dashboard.enabledState();
+    const note = d.ok ? ' · 📊 /dashboard 활성 (로그인: /dashboard/login)' : config.DASHBOARD.TOKEN ? ` · ⚠️ 대시보드 비활성 (${d.why})` : '';
+    console.log(`🩺 헬스 체크 :${port}${note}`);
+  });
 
 // ───────────── 주기 작업 ─────────────
 async function sweepEscrow() {
@@ -131,11 +138,31 @@ async function heartbeat() {
 
 let bootRecovery = null;
 let shuttingDown = false;
+const lock = instanceLock.create(wallet.INSTANCE_ID);
+
+// ───────────── 주기 작업 (리더 임대를 가진 인스턴스만 실행) ─────────────
+scheduler.register('escrow-sweep', config.ECONOMY.ESCROW_SWEEP_MS, sweepEscrow);
+scheduler.register('heartbeat', 30_000, heartbeat);
+scheduler.register('season-rollover', 3600_000, () => seasons.autoRollover());
+scheduler.register(
+  'outbox',
+  config.OUTBOX.SWEEP_MS,
+  async () => {
+    const r = await outbox.sweep();
+    if (r.processed || r.materialized) console.log(`📮 Outbox: 이관 ${r.materialized}, 처리 ${r.processed}, 실패 ${r.failed}`);
+  },
+  { runOnStart: true },
+);
+scheduler.register('transfer-recovery', 60_000, async () => {
+  const r = await wallet.recoverTransfers();
+  if (r.completed || r.failed) console.log(`💸 중단된 송금 복구: 완료 ${r.completed}, 취소 ${r.failed}`);
+});
 
 async function shutdown(signal, code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`🛑 ${signal} — 진행 중 게임 ${sessions.size}개 종료, 이 프로세스의 판 복구 처리`);
+  scheduler.stop();
   sessions.shutdown();
   try {
     const r = await wallet.recoverOwn();
@@ -144,6 +171,7 @@ async function shutdown(signal, code = 0) {
   } catch (err) {
     console.error('[shutdown]', err.message);
   }
+  await lock.release(); // 다음 인스턴스가 기다리지 않고 바로 이어받도록
   server.close();
   await client.destroy();
   await mongoose.disconnect().catch(() => {});
@@ -165,22 +193,40 @@ process.on('uncaughtException', async (err) => {
   await connectDB(MONGODB_URI);
   mongoose.connection.on('disconnected', () => alert('error', 'MongoDB 연결 끊김', '자동 재연결 시도 중'));
 
+  // Koyeb 등 scale-to-zero 호스팅에서 잠들지 않도록 공개 URL로 주기적 핑 (임대 대기 중에도 헬스 체크는 응답)
+  keepAlive.start({ onFail: (streak, err) => streak >= 3 && alert('warn', 'keep-alive 핑 연속 실패', `${streak}회 · ${err.message} — 인스턴스가 잠들 수 있어요`) });
+
+  // 단일 인스턴스 보장: 리더 임대를 얻을 때까지 디스코드 로그인·복구·주기 작업을 하지 않음
+  let alerted = false;
+  await lock.acquire({
+    onWait: (h) => {
+      console.warn(`⏳ 다른 인스턴스(${h?.instance ?? '?'})가 실행 중 — 임대 만료(${h?.leaseUntil ? new Date(h.leaseUntil).toISOString() : '?'})까지 대기`);
+      if (!alerted) alert('warn', '중복 인스턴스 감지', `실행 중인 인스턴스 ${h?.instance ?? '?'} 의 임대가 끝날 때까지 이 인스턴스는 대기합니다.`);
+      alerted = true;
+    },
+  });
+  console.log(`👑 리더 임대 획득 (${wallet.INSTANCE_ID})`);
+  lock.keep({
+    onLost: (h) => {
+      alert('error', '리더 임대 상실 — 중복 실행', `다른 인스턴스(${h?.instance ?? '?'})가 임대를 가져갔습니다. 중복 처리를 막기 위해 이 인스턴스를 종료합니다.`);
+      shutdown('lease-lost', 1);
+    },
+  });
+
   // 이전 프로세스의 비정상 종료 감지
   const prev = await SystemState.findById('main').lean();
   if (prev && prev.cleanShutdown === false) alert('warn', '비정상 종료 감지', `이전 프로세스 마지막 생존 신호: ${prev.lastHeartbeat?.toISOString?.() ?? '?'}`);
   await SystemState.updateOne({ _id: 'main' }, { $set: { bootedAt: new Date(), instance: wallet.INSTANCE_ID, cleanShutdown: false } }, { upsert: true });
 
-  // 재시작 복구: 이전 프로세스의 판 — 결과 확정분은 정산, 나머지 환불 (디스코드 메시지 정리는 로그인 후)
+  // 재시작 복구: 이전 프로세스의 판 — 결과 확정분은 정산(전적·미션 포함), 나머지 환불 (디스코드 메시지 정리는 로그인 후)
   if (config.ECONOMY.RECOVER_ON_BOOT) {
     bootRecovery = await wallet.recoverPrevious();
-    console.log(`🔧 부팅 복구: 정산 ${bootRecovery.settled}, 환불 ${bootRecovery.refunded}, 실패 ${bootRecovery.failed}`);
+    console.log(`🔧 부팅 복구: 정산 ${bootRecovery.settled}, 환불 ${bootRecovery.refunded}, 차단 ${bootRecovery.blocked}, 실패 ${bootRecovery.failed}`);
   } else await sweepEscrow();
+  const tr = await wallet.recoverTransfers(0);
+  if (tr.completed || tr.failed) console.log(`💸 부팅 송금 복구: 완료 ${tr.completed}, 취소 ${tr.failed}`);
 
-  setInterval(sweepEscrow, config.ECONOMY.ESCROW_SWEEP_MS).unref();
-  setInterval(heartbeat, 30_000).unref();
-  setInterval(() => seasons.autoRollover().catch((e) => console.error('[season]', e)), 3600_000).unref();
-  // Koyeb 등 scale-to-zero 호스팅에서 잠들지 않도록 공개 URL로 주기적 핑 (src/services/keepAlive.js)
-  keepAlive.start({ onFail: (streak, err) => streak >= 3 && alert('warn', 'keep-alive 핑 연속 실패', `${streak}회 · ${err.message} — 인스턴스가 잠들 수 있어요`) });
+  scheduler.start({ isLeader: () => lock.isLeader() && !shuttingDown });
   await heartbeat();
   await client.login(DISCORD_TOKEN);
 })().catch(async (err) => {

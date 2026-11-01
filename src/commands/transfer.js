@@ -17,7 +17,7 @@ const pending = new Map(); // 확인 대기 중인 송금 (메모 보관)
 
 async function check(fromId, toId, guildId, amount) {
   const fee = feeOf(amount);
-  const [acc, sent] = await Promise.all([wallet.getAccount(fromId, guildId), wallet.transferredToday(fromId, guildId, time.dayKey, time.dayKey())]);
+  const [acc, sent] = await Promise.all([wallet.getAccount(fromId, guildId), wallet.transferredToday(fromId, guildId, time.dayKey())]);
   const left = TF.DAILY_LIMIT - sent;
   if (amount + fee > left) return { reason: `오늘 남은 송금 한도는 ${chips(Math.max(0, left))} (수수료 포함)예요. (하루 ${chips(TF.DAILY_LIMIT)}, KST 자정 초기화)` };
   if (acc.money < amount + fee) return { reason: `잔고가 부족해요. 필요 ${chips(amount + fee)} (수수료 ${num(fee)} 포함) · 현재 ${chips(acc.money)}` };
@@ -39,6 +39,8 @@ module.exports = {
     const memo = (i.options.getString('메모') ?? '').trim();
     if (to.id === i.user.id) return i.reply(ephemeral('자기 자신에게는 보낼 수 없어요.'));
     if (to.bot) return i.reply(ephemeral('봇에게는 보낼 수 없어요.'));
+    if (!wallet.isUserId(to.id)) return i.reply(ephemeral('올바르지 않은 사용자예요.'));
+    if (!Number.isSafeInteger(amount) || amount < TF.MIN || amount > TF.DAILY_LIMIT) return i.reply(ephemeral(`금액은 ${chips(TF.MIN)} ~ ${chips(TF.DAILY_LIMIT)} 사이여야 해요.`));
     const c = await check(i.user.id, to.id, i.guildId, amount);
     if (c.reason) return i.reply(ephemeral(`❌ ${c.reason}`));
     const key = `${i.id}`;
@@ -69,17 +71,21 @@ module.exports = {
   async handleButton(i, { action, arg }) {
     const p = pending.get(arg);
     if (!p) return i.update({ content: '⌛ 만료되었거나 이미 처리된 송금이에요.', embeds: [], components: [] });
-    pending.delete(arg);
+    pending.delete(arg); // 연타해도 두 번째 클릭은 여기서 막히고, 지갑도 transferId로 한 번만 처리
     if (action === 'no') return i.update({ content: '✖️ 송금을 취소했어요.', embeds: [], components: [] });
     await i.deferUpdate();
-    const c = await check(i.user.id, p.toId, i.guildId, p.amount);
-    if (c.reason) return i.editReply({ content: `❌ ${c.reason}`, embeds: [], components: [] });
-    const r = await wallet.transfer({ fromId: i.user.id, toId: p.toId, guildId: i.guildId, amount: p.amount, fee: c.fee, memo: p.memo });
-    if (!r.ok) return i.editReply({ content: r.reason === 'balance' ? '❌ 잔고가 부족해요.' : '⚠️ 송금 중 오류가 발생해 환불했어요.', embeds: [], components: [] });
+    const fee = feeOf(p.amount);
+    // 한도 검사와 차감은 wallet.transfer 안에서 원자적으로 (여기서 미리 읽은 값은 안내용일 뿐)
+    const r = await wallet.transfer({ transferId: `tf:${arg}`, fromId: i.user.id, toId: p.toId, guildId: i.guildId, amount: p.amount, fee, limit: TF.DAILY_LIMIT, day: time.dayKey(), memo: p.memo });
+    if (!r.ok) {
+      const why = { balance: '잔고가 부족해요.', limit: `오늘 송금 한도(${chips(TF.DAILY_LIMIT)}, 수수료 포함)를 넘어요.`, self: '자기 자신에게는 보낼 수 없어요.', invalid: `잘못된 요청이에요. ${r.message ?? ''}` }[r.reason] ?? '⚠️ 처리 중 오류가 발생했어요. 잔고는 자동으로 확인·복구돼요.';
+      return i.editReply({ content: `❌ ${why}`, embeds: [], components: [] });
+    }
+    const left = TF.DAILY_LIMIT - (await wallet.transferredToday(i.user.id, i.guildId, time.dayKey()));
     const embed = new EmbedBuilder()
       .setColor(COLOR.win)
       .setTitle('💸 송금 완료')
-      .setDescription([`<@${i.user.id}> → <@${p.toId}> **${chips(p.amount)}**`, p.memo ? `📝 ${p.memo}` : '', `수수료 ${chips(r.fee)} · 오늘 남은 한도 ${chips(c.left - p.amount - r.fee)}`].filter(Boolean).join('\n'));
+      .setDescription([`<@${i.user.id}> → <@${p.toId}> **${chips(p.amount)}**`, p.memo ? `📝 ${p.memo}` : '', `수수료 ${chips(r.fee)} · 오늘 남은 한도 ${chips(Math.max(0, left))}`].filter(Boolean).join('\n'));
     return i.editReply({ content: '', embeds: [embed], components: [], allowedMentions: { users: [p.toId] } });
   },
 };

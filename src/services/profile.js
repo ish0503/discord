@@ -3,7 +3,7 @@
  * round:settled 이벤트를 구독해 자동 갱신된다 (정산 로직과 분리).
  */
 const Profile = require('../db/Profile');
-const bus = require('./bus');
+const outbox = require('./outbox');
 const wallet = require('./wallet');
 const notifier = require('./notifier');
 const events = require('./events');
@@ -74,39 +74,42 @@ async function unlock(userId, guildId, list, channelId) {
 }
 const points = (n) => `${n.toLocaleString('en-US')}P`;
 
-/** 정산 이벤트 → 누적 전적·연승·미션·업적 */
-async function onRoundSettled(ev) {
-  if (ev.recovered) return; // 복구 정산은 전적에만 남기고 연승·업적 판정 제외
+/**
+ * 정산 이벤트 → 누적 전적·연승·미션·업적 (Outbox 핸들러).
+ * 멱등: 전적·연승·미션 증가와 "처리한 이벤트 표식(processedEvents)"을 한 번의 조건부 업데이트로 반영 →
+ *       같은 이벤트가 몇 번 다시 와도 한 번만 반영된다. 업적 해금은 원래 중복 불가($ne).
+ * 복구(재시작) 정산도 같은 경로로 들어와 전적·미션·업적에 반영된다.
+ */
+async function onRoundSettled(ev, meta = {}) {
+  const eventId = meta.eventId ?? `settle:${ev.roundId}`;
   const win = ev.net > 0;
   const lose = ev.net < 0;
-  const inc = { 'totals.games': 1, 'totals.wagered': ev.staked };
-  if (win) inc['totals.wins'] = 1;
-  const update = { $inc: inc };
-  if (win) update.$inc.winStreak = 1;
-  else if (lose) update.$set = { winStreak: 0 };
   await get(ev.userId);
-  let p = await Profile.findOneAndUpdate({ userId: ev.userId }, update, { new: true }).lean();
-  if (p.winStreak > p.maxWinStreak) {
-    p = await Profile.findOneAndUpdate({ userId: ev.userId }, { $max: { maxWinStreak: p.winStreak } }, { new: true }).lean();
+  let p = await rollMissions(await get(ev.userId));
+  const inc = { 'totals.games': 1, 'totals.wagered': ev.staked };
+  if (win) {
+    inc['totals.wins'] = 1;
+    inc.winStreak = 1;
   }
-
-  // 미션 진행
-  p = await rollMissions(p);
   const { daily, weekly } = currentMissions();
-  const missionInc = {};
   for (const m of daily) {
     const d = missions.increment(m, ev);
-    if (d) missionInc[`missions.daily.${m.id}`] = d;
+    if (d) inc[`missions.daily.${m.id}`] = d;
   }
   for (const m of weekly) {
     const d = missions.increment(m, ev);
-    if (d) missionInc[`missions.weekly.${m.id}`] = d;
+    if (d) inc[`missions.weekly.${m.id}`] = d;
   }
-  if (Object.keys(missionInc).length) p = await Profile.findOneAndUpdate({ userId: ev.userId }, { $inc: missionInc }, { new: true }).lean();
-
-  // 업적
+  const update = { $inc: inc, $push: { processedEvents: { $each: [eventId], $slice: -300 } } };
+  if (lose) update.$set = { winStreak: 0 };
+  const applied = await Profile.findOneAndUpdate({ userId: ev.userId, processedEvents: { $ne: eventId } }, update, { new: true }).lean();
+  p = applied ?? (await get(ev.userId)); // 이미 반영된 이벤트면 현재 상태로 업적만 다시 확인 (업적은 중복 지급 안 됨)
+  if (p.winStreak > p.maxWinStreak) {
+    p = await Profile.findOneAndUpdate({ userId: ev.userId }, { $max: { maxWinStreak: p.winStreak } }, { new: true }).lean();
+  }
   const unlocked = achievements.evaluate({ ev, profile: p }, (p.achievements || []).map((a) => a.id));
-  if (unlocked.length) await unlock(ev.userId, ev.guildId, unlocked, ev.channelId);
+  if (unlocked.length) await unlock(ev.userId, ev.guildId, unlocked, ev.recovered ? null : ev.channelId);
+  return { applied: !!applied };
 }
 
 /** 게임 외 트리거(출석·시즌)로 업적 판정 */
@@ -181,6 +184,6 @@ async function equip(userId, type, value) {
   return { ok: true };
 }
 
-bus.on('round:settled', onRoundSettled);
+outbox.register('round.settled', 'profile', (payload, ev) => onRoundSettled(payload, { eventId: ev.eventId }));
 
 module.exports = { get, cosmeticsOf, currentMissions, rollMissions, claimMission, checkTrigger, addPoints, purchase, equip, onRoundSettled };

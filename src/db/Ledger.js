@@ -9,8 +9,10 @@ const ledgerSchema = new Schema({
   amount: { type: Number, required: true }, // +발행 / −회수
   reason: String,
   actorId: String,
+  refId: String, // 멱등 표식 (송금: out:/in:<transferId>)
   createdAt: { type: Date, default: Date.now },
 });
 ledgerSchema.index({ economyKey: 1, createdAt: -1 });
+ledgerSchema.index({ refId: 1, userId: 1 }, { unique: true, partialFilterExpression: { refId: { $type: 'string' } } }); // 같은 송금 원장 중복 방지
 
 module.exports = model('Ledger', ledgerSchema);

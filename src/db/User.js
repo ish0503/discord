@@ -42,6 +42,7 @@ const escrowSchema = new Schema(
     gameId: { type: String }, // GameState와 연결
     pendingPayout: { type: Number, default: null },
     pendingMeta: { type: Schema.Types.Mixed, default: null },
+    blocked: { type: Schema.Types.Mixed, default: null }, // 정산 검증 실패 { reason, at } → 자동 복구 대상에서 제외, 관리자 확인
     createdAt: { type: Date, default: Date.now },
   },
   { _id: false },
@@ -58,6 +59,10 @@ const userSchema = new Schema(
     lastBailoutAt: { type: Date, default: null },
     lastDailyKey: { type: String, default: null },
     dailyStreak: { type: Number, default: 0 },
+    // 정산과 같은 원자적 업데이트로 기록되는 Outbox 이벤트 (OutboxEvent 컬렉션으로 옮기면 비움)
+    outbox: { type: [Schema.Types.Mixed], default: [] },
+    // 송금 멱등 표식 (out:<transferId> / in:<transferId>, 최근 200개)
+    txLog: { type: [String], default: [] },
   },
   { timestamps: true },
 );
@@ -65,5 +70,6 @@ const userSchema = new Schema(
 userSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 userSchema.index({ guildId: 1, money: -1 });
 userSchema.index({ 'escrow.createdAt': 1 }, { sparse: true });
+userSchema.index({ 'outbox.0': 1 }, { sparse: true });
 
 module.exports = model('User', userSchema);

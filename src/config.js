@@ -34,7 +34,19 @@ module.exports = {
   },
 
   ALERTS: { WEBHOOK_URL: env.ALERT_WEBHOOK_URL || '', THROTTLE_MS: 60_000 },
-  DASHBOARD: { TOKEN: env.DASHBOARD_TOKEN || '' },
+  DASHBOARD: {
+    TOKEN: env.DASHBOARD_TOKEN || '',
+    MIN_TOKEN_LENGTH: 32, // 짧은 토큰은 거부 (생성: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
+    SESSION_TTL_MS: Number(env.DASHBOARD_SESSION_TTL_MS) || 60 * 60_000,
+    TOKEN_EXPIRES_AT: env.DASHBOARD_TOKEN_EXPIRES_AT ? Date.parse(env.DASHBOARD_TOKEN_EXPIRES_AT) || null : null,
+    COOKIE_SECURE: env.DASHBOARD_COOKIE_SECURE === 'true',
+  },
+
+  // 정산 이벤트 Outbox: 재시도 백오프·점유 시간·포기 한도
+  OUTBOX: { LEASE_MS: 60_000, BASE_BACKOFF_MS: 5_000, MAX_BACKOFF_MS: 10 * 60_000, MAX_ATTEMPTS: 8, SWEEP_MS: 30_000, SWEEP_BATCH: 200 },
+
+  // 단일 인스턴스 리더 임대 (scheduler·복구·Outbox 처리는 임대를 가진 인스턴스만)
+  INSTANCE: { LEASE_TTL_MS: 45_000, RENEW_MS: 15_000, WAIT_LOG_MS: 30_000 },
 
   // /송금: 수수료는 소각 (부계정 칩 몰아주기 억제), 하루 한도는 보낸 금액+수수료 기준 (KST 자정 초기화)
   TRANSFER: { MIN: 100, FEE_RATE: 0.05, DAILY_LIMIT: 200_000 },

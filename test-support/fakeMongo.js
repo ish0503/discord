@@ -109,6 +109,18 @@ function applyUpdate(doc, update, filter, inserting) {
   }
 }
 
+/** 고유 인덱스 (실제 스키마와 같게) — create 시 중복이면 code 11000 */
+const UNIQUE = {
+  GameLog: [['roundId']],
+  Tournament: [['tournamentId']],
+  GameState: [['gameId']],
+  OutboxEvent: [['eventId']],
+  Transfer: [['transferId']],
+  SettlementRecord: [['settlementId']],
+  TransferQuota: [['economyKey', 'userId', 'day']],
+  Ledger: [['refId', 'userId']],
+};
+
 let seq = 0;
 function makeModel(name, defaults = () => ({})) {
   const docs = [];
@@ -139,10 +151,9 @@ function makeModel(name, defaults = () => ({})) {
     docs,
     reset: () => docs.splice(0),
     create: async (d) => {
-      if (['GameLog', 'Tournament', 'GameState'].includes(name)) {
-        const key = { GameLog: 'roundId', Tournament: 'tournamentId', GameState: 'gameId' }[name];
-        if (docs.some((x) => x[key] === d[key])) {
-          const e = new Error('dup');
+      for (const keys of UNIQUE[name] ?? []) {
+        if (docs.some((x) => keys.every((k) => getPath(x, k) !== undefined && eq(getPath(x, k), getPath(d, k))))) {
+          const e = new Error(`dup ${name} ${keys}`);
           e.code = 11000;
           throw e;
         }

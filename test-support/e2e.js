@@ -125,15 +125,18 @@ const btn=(cmd,uid,customId,opts,extra)=>{ const [prefix,owner,action,...rest]=c
   ok(ids().some(x=>x.includes(':again:')), '같은 설정 재시작 버튼');
 
   step('송금·도움말');
-  M.User.docs.find(d=>d.userId==='A') || await wallet.getAccount('A','G');
-  M.User.docs.find(d=>d.userId==='A').money=50000; await wallet.getAccount('Q','G');
-  await cmds['송금'].execute(mk('A',{'유저':{id:'A'},'금액':1000})); ok(eph.at(-1).includes('자기 자신'), '자기 자신 송금 차단');
-  await cmds['송금'].execute(mk('A',{'유저':{id:'Q'},'금액':10000,'메모':'고마워'}));
+  const SA='100000000000000777', SQ='100000000000000888';
+  await wallet.getAccount(SA,'G'); M.User.docs.find(d=>d.userId===SA).money=50000; await wallet.getAccount(SQ,'G');
+  await cmds['송금'].execute(mk(SA,{'유저':{id:SA},'금액':1000})); ok(eph.at(-1).includes('자기 자신'), '자기 자신 송금 차단');
+  await cmds['송금'].execute(mk(SA,{'유저':{id:'Q'},'금액':1000})); ok(eph.at(-1).includes('올바르지 않은'), '잘못된 사용자 ID 차단');
+  await cmds['송금'].execute(mk(SA,{'유저':{id:SQ},'금액':10000,'메모':'고마워'}));
   ok(desc(pub).includes('받는 사람') && ids().some(x=>x.includes(':ok:')), '송금 확인 화면 (확인 버튼)');
-  await btn('송금','A',ids().find(x=>x.includes(':ok:')));
-  ok(money('A')===50000-10500 && money('Q')===20000, `송금 완료 (A ${money('A')}, Q ${money('Q')}) · 수수료 5% 소각`);
-  ok(desc(pub).includes('<@A> → <@Q>'), '송금 결과 공개');
-  await cmds['송금'].execute(mk('A',{'유저':{id:'Q'},'금액':195000})); ok(eph.at(-1).includes('한도'), '하루 송금 한도');
+  const okId=ids().find(x=>x.includes(':ok:'));
+  await btn('송금',SA,okId);
+  ok(money(SA)===50000-10500 && money(SQ)===20000, `송금 완료 (보낸 ${money(SA)}, 받은 ${money(SQ)}) · 수수료 5% 소각`);
+  ok(desc(pub).includes(`<@${SA}> → <@${SQ}>`), '송금 결과 공개');
+  await btn('송금',SA,okId); ok(money(SA)===39500, '확인 버튼 연타해도 한 번만');
+  await cmds['송금'].execute(mk(SA,{'유저':{id:SQ},'금액':195000})); ok(eph.at(-1).includes('한도') || eph.at(-1).includes('잔고'), '하루 송금 한도/잔고 검사');
   await cmds['도움말'].execute(mk('A')); ok(eph.at(-1)!==undefined, '도움말');
   await cmds['도움말'].execute(mk('A',{'분류':'howto'})); ok(['21을 넘지','9에 가까운','잭팟','캐시아웃','Lo(2~6)','홀덤','블라인드'].every(g=>eph.at(-1).includes(g)), '도움말 게임 방법 (7개 게임)');
 

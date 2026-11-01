@@ -70,7 +70,7 @@ async function spinOnce(s) {
   let pool = 0;
   if (reels.every((e) => e === SL.JACKPOT_SYMBOL)) pool = await jackpot.take(s.guildId, s.userId);
   const payout = Math.floor(s.bet * ev.multiplier) + pool;
-  await settlement.commit({ userId: s.userId, guildId: s.guildId, roundId: r.roundId, payout, game: 'slot', detail: { reels } });
+  await settlement.commit({ userId: s.userId, guildId: s.guildId, roundId: r.roundId, payout, game: 'slot', detail: { reels, multiplier: ev.multiplier, jackpot: pool } });
 
   const frame = [BLANK, BLANK, BLANK];
   const fast = Boolean(s.auto);

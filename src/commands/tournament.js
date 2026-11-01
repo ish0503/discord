@@ -289,25 +289,33 @@ async function finishTournament(room, T, reason, lines) {
   const paid = prizes(T.pool, humanOrder);
   const prizeOf = (id) => paid.find((p) => p.userId === id);
 
-  for (const seat of room.seats.filter((s) => s.type === 'human')) {
-    const pr = prizeOf(seat.id);
+  const humanSeats = room.seats.filter((s) => s.type === 'human');
+  const entries = humanSeats.map((seat) => {
     const place = T.finish.find((f) => f.id === seat.id).place;
-    const payout = pr?.amount ?? 0;
-    await settlement.commit({ userId: seat.id, guildId: room.guildId, roundId: seat.roundId, payout, game: 'tournament' });
-    await settlement.finalize({
+    const payout = prizeOf(seat.id)?.amount ?? 0;
+    return {
       userId: seat.id,
-      guildId: room.guildId,
       roundId: seat.roundId,
       payout,
-      game: 'tournament',
-      gameId: room.id,
-      channelId: room.channelId,
+      staked: T.fee,
+      maxPayout: T.pool,
       inc: { tournaments: 1, ...(place === 1 ? { tournamentWins: 1 } : {}) },
       wagered: T.fee,
-      detail: { tournamentId: room.id, place, humanPlace: humanOrder.indexOf(seat.id) + 1, humans: humanOrder.length, prize: payout, entrants: T.finish.length, reason },
-    });
-    sessions.end(seat.marker);
-  }
+      detail: { tournamentId: room.id, place, humanPlace: humanOrder.indexOf(seat.id) + 1, humans: humanOrder.length, prize: payout, entrants: T.finish.length, reason, opponents: humanSeats.filter((x) => x.id !== seat.id).map((x) => x.id) },
+    };
+  });
+  // 불변식: 상금 합계 = 상금 풀 (≤ 사람 참가비 합)
+  T.settlement = await settlement.batch({
+    settlementId: `tournament:${room.id}`,
+    game: 'tournament',
+    guildId: room.guildId,
+    gameId: room.id,
+    channelId: room.channelId,
+    entries,
+    expectTotal: T.pool,
+    maxTotal: T.fee * humanSeats.length,
+  });
+  for (const seat of humanSeats) sessions.end(seat.marker);
   await Tournament.updateOne(
     { tournamentId: room.id },
     { $set: { state: 'finished', finish: T.finish, prizes: paid, hands: room.handNo, endedReason: reason } },

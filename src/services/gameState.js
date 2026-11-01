@@ -80,4 +80,9 @@ async function retry(gameId) {
   return out;
 }
 
-module.exports = { create, transition, update, addPlayer, recoverBoot, flag, listRecovery, retry, TERMINAL };
+/** 게임이 이 서버 것인지 (관리자 작업의 서버 간 격리) */
+async function belongsTo(gameId, guildId) {
+  return (await GameState.countDocuments({ gameId, guildId })) > 0;
+}
+
+module.exports = { belongsTo, create, transition, update, addPlayer, recoverBoot, flag, listRecovery, retry, TERMINAL };

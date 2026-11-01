@@ -3,19 +3,15 @@
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { makeModel } = require('../test-support/fakeMongo');
+const { M } = require('../test-support/useFakes');
 
-const User = makeModel('User', () => ({ money: 10_000, escrow: [], stats: {}, diceLossStreak: 0, lastBailoutAt: null, lastDailyKey: null, dailyStreak: 0 }));
-const GameLog = makeModel('GameLog');
-const Ledger = makeModel('Ledger');
-const inject = (rel, exp) => {
-  const p = require.resolve(path.join(__dirname, '..', rel));
-  require.cache[p] = { id: p, filename: p, loaded: true, exports: exp };
-};
-inject('src/db/User.js', User);
-inject('src/db/GameLog.js', GameLog);
-inject('src/db/Ledger.js', Ledger);
+// 모든 모델이 인메모리 (src 모듈을 불러오기 전에 바꿔 끼움)
+require('../src/db/User');
+require('../src/db/GameLog');
+require('../src/db/Ledger');
+const User = M.User;
+const GameLog = M.GameLog;
+const Ledger = M.Ledger;
 
 const wallet = require('../src/services/wallet');
 const bus = require('../src/services/bus');

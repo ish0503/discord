@@ -11,6 +11,12 @@ const seasons = require('../services/seasons');
 const events = require('../services/events');
 const gameState = require('../services/gameState');
 const profile = require('../services/profile');
+const outbox = require('../services/outbox');
+const settlement = require('../services/settlement');
+const scheduler = require('../services/scheduler');
+const dashboard = require('../services/dashboard');
+const User = require('../db/User');
+const Transfer = require('../db/Transfer');
 const AuditLog = require('../db/AuditLog');
 const registry = require('../games/registry');
 const { COLOR, chips, num, netText, ephemeral } = require('../utils/format');
@@ -181,6 +187,8 @@ const handlers = {
       const list = await gameState.listRecovery(i.guildId);
       return list.length ? `🔧 확인 필요 게임:\n${list.map((g) => `\`${g.gameId}\` ${registry.label(g.game)} · ${g.history.at(-1)?.note ?? ''}`).join('\n')}` : '✅ 확인이 필요한 게임이 없어요.';
     }
+    // 서버 간 격리: 이 서버의 게임만 재시도 가능
+    if (!(await gameState.belongsTo(id, i.guildId))) return '❌ 이 서버의 게임 ID가 아니에요.';
     const out = await gameState.retry(id);
     await audit(i, 'recovery.retry', { targetId: id, after: { settled: out.settled, refunded: out.refunded, failed: out.failed } });
     return `🔧 재시도 결과: 정산 ${out.settled} · 환불 ${out.refunded} · 실패 ${out.failed}`;
@@ -215,6 +223,42 @@ const handlers = {
     if (!n) return '진행 중인 이벤트가 없어요.';
     await audit(i, 'event.endAll', { amount: n });
     return announce('🔚 이벤트 종료', `진행 중이던 이벤트 ${n}개가 종료되었습니다. 참여해 주셔서 감사합니다!`, COLOR.push);
+  },
+
+  async 정산상태(i) {
+    const retry = i.options.getBoolean('재시도');
+    let retried = 0;
+    if (retry) {
+      retried = await outbox.retryDead(i.guildId);
+      await audit(i, 'outbox.retry', { amount: retried });
+    }
+    const key = wallet.economyKey(i.guildId);
+    const [ob, recs, blockedUsers, pendingTx] = await Promise.all([
+      outbox.status(i.guildId),
+      settlement.pendingRecords(i.guildId),
+      User.find({ guildId: key, 'escrow.blocked': { $ne: null } }, { userId: 1, escrow: 1 }).limit(10).lean(),
+      Transfer.countDocuments({ economyKey: key, status: 'pending' }),
+    ]);
+    const blocked = blockedUsers.flatMap((u) => u.escrow.filter((e) => e.blocked).map((e) => `\`${e.gameId ?? e.roundId}\` <@${u.userId}> ${registry.label(e.game)} ${num(e.amount)} — ${e.blocked.reason}`));
+    const jobs = scheduler.status();
+    return new EmbedBuilder()
+      .setColor(ob.dead || blocked.length || recs.length ? COLOR.lose : COLOR.win)
+      .setTitle('🧾 정산·Outbox 상태')
+      .addFields(
+        { name: 'Outbox 이벤트', value: `대기 ${ob.pending} · 처리 중 ${ob.processing} · 재시도 대기 ${ob.failed} · **포기(dead) ${ob.dead}**${retry ? `\n🔁 ${retried}건 재시도 예약` : ''}` },
+        { name: '최근 실패', value: ob.recent.map((e) => `\`${e.eventId}\` ${e.status} ${e.attempts}회 — ${e.lastError ?? ''}`).join('\n').slice(0, 1024) || '-' },
+        { name: '확인 필요한 다인 정산', value: recs.map((r) => `\`${r.settlementId}\` ${r.status} — ${(r.issues || []).join(', ').slice(0, 120)}`).join('\n').slice(0, 1024) || '-' },
+        { name: '검증 실패로 보류된 판 (자동 복구 제외)', value: blocked.join('\n').slice(0, 1024) || '-' },
+        { name: '처리 중 송금', value: `${pendingTx}건 (1분 넘게 멈춘 거래는 자동 복구)` },
+        { name: '주기 작업', value: jobs.map((j) => `${j.lastError ? '⚠️' : '✅'} ${j.name} · ${j.lastRun ? `<t:${Math.floor(new Date(j.lastRun).getTime() / 1000)}:R>` : '아직 실행 전'}`).join('\n').slice(0, 1024) || '-' },
+      )
+      .setFooter({ text: '보류된 판: /관리자 복구 게임id:<id> → 원금 환불 · Outbox 포기 이벤트: 재시도:True' });
+  },
+
+  async 대시보드세션폐기(i) {
+    const n = dashboard.revokeAll();
+    await audit(i, 'dashboard.revokeAll', { amount: n });
+    return `🔒 대시보드 세션 ${n}개를 폐기했어요. 토큰을 바꾸려면 DASHBOARD_TOKEN을 새 값으로 바꾸고 재시작하세요 (이전 토큰 세션은 자동 무효).`;
   },
 
   async 관리자역할(i) {
@@ -264,6 +308,8 @@ const data = new SlashCommandBuilder()
       .addIntegerOption((o) => o.setName('시간').setDescription('진행 시간(시간)').setRequired(true).setMinValue(1).setMaxValue(24 * 14)),
   )
   .addSubcommand((s) => s.setName('이벤트종료').setDescription('진행 중 이벤트 모두 종료'))
+  .addSubcommand((s) => s.setName('정산상태').setDescription('Outbox·다인 정산·보류된 판·주기 작업 상태').addBooleanOption((o) => o.setName('재시도').setDescription('실패·포기한 Outbox 이벤트를 다시 처리')))
+  .addSubcommand((s) => s.setName('대시보드세션폐기').setDescription('웹 대시보드 로그인 세션 모두 폐기'))
   .addSubcommand((s) => s.setName('관리자역할').setDescription('관리자 역할 지정 (비우면 해제)').addRoleOption((o) => o.setName('역할').setDescription('역할')));
 
 module.exports = {

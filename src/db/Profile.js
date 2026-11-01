@@ -21,6 +21,8 @@ const profileSchema = new Schema(
       wins: { type: Number, default: 0 },
       wagered: { type: Number, default: 0 },
     },
+    // 처리한 정산 이벤트 id (최근 300개) — Outbox 재처리 시 전적·미션 중복 반영 방지
+    processedEvents: { type: [String], default: [] },
     winStreak: { type: Number, default: 0 },
     maxWinStreak: { type: Number, default: 0 },
     missions: {

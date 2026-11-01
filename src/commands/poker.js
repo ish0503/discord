@@ -87,19 +87,18 @@ async function start(l, { buyin, bots, maxHumans, sb, bb }) {
 async function finish(room, h, { l, buyin, bots, maxHumans }) {
   gameState.transition(room.id, 'SETTLING');
   const lines = [];
+  const tableTotal = room.startStacks.reduce((a, b) => a + b, 0);
+  const entries = [];
   for (let k = 0; k < h.seats.length; k++) {
     const seat = room.handSeats[k];
     if (seat.type !== 'human') continue;
     const r = h.results[k];
-    await settlement.commit({ userId: seat.id, guildId: room.guildId, roundId: seat.roundId, payout: r.finalStack, game: 'poker' });
-    const st = await settlement.finalize({
+    entries.push({
       userId: seat.id,
-      guildId: room.guildId,
       roundId: seat.roundId,
       payout: r.finalStack,
-      game: 'poker',
-      gameId: room.id,
-      channelId: room.channelId,
+      staked: buyin,
+      maxPayout: tableTotal, // 한 핸드에서 딸 수 있는 최대 = 테이블 전체 칩
       inc: { pokerHands: 1, ...(r.net > 0 ? { pokerWins: 1 } : {}) },
       wagered: h.seats[k].totalIn,
       detail: {
@@ -111,11 +110,29 @@ async function finish(room, h, { l, buyin, bots, maxHumans }) {
         endReason: h.endReason,
         seats: h.seats.length,
         buyin,
+        opponents: room.handSeats.filter((x) => x.type === 'human' && x.id !== seat.id).map((x) => x.id),
       },
     });
-    if (!st.ok) lines.push(`⚠️ ${seat.name} 정산 지연 (자동 복구 예정)`);
-    sessions.end(seat.marker);
   }
+  // 불변식: 핸드 전후 테이블 전체 칩(사람+봇)이 같아야 함 (칩 보존)
+  const st = await settlement.batch({
+    settlementId: `poker:${room.id}:${room.handNo}`,
+    game: 'poker',
+    guildId: room.guildId,
+    gameId: room.id,
+    channelId: room.channelId,
+    entries,
+    maxTotal: tableTotal,
+    check: () => {
+      const after = h.results.reduce((a, r) => a + r.finalStack, 0);
+      return after === tableTotal ? { ok: true } : { ok: false, reason: `칩 보존 위반: 시작 ${tableTotal} ≠ 종료 ${after}` };
+    },
+  });
+  for (const e of entries) {
+    const r = st.results.get(e.roundId);
+    if (!r?.ok) lines.push(`⚠️ ${room.handSeats.find((x) => x.id === e.userId)?.name ?? e.userId} 정산 ${st.status === 'rejected' ? '보류 (검증 실패 — 관리자 확인)' : '지연 (자동 복구 예정)'}`);
+  }
+  for (const seat of room.handSeats) if (seat.type === 'human') sessions.end(seat.marker);
   gameState.transition(room.id, 'COMPLETED');
   room.close();
   const again = new ActionRowBuilder().addComponents(
