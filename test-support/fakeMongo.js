@@ -246,6 +246,7 @@ function makeModel(name, defaults = () => ({}), schema = null) {
   };
   const model = {
     name,
+    schema, // 실제 스키마 정의 (stub Schema: .d = 정의 객체)
     docs,
     reset: () => docs.splice(0),
     create: async (d) => {
