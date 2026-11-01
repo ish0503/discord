@@ -109,6 +109,89 @@ function applyUpdate(doc, update, filter, inserting) {
   }
 }
 
+/**
+ * 스키마 경로 검사 — 실제 Mongoose(strict·strictQuery)는 스키마에 없는 필드를 저장·조회 조건에서
+ * "조용히 버린다". 인메모리 가짜 DB가 그걸 그냥 받아 주면 테스트는 통과하는데 운영에서만 고장난다.
+ * 그래서 스키마에 없는 경로를 쓰면 테스트에서 바로 실패시킨다.
+ */
+const ALWAYS = new Set(['_id', '__v', 'createdAt', 'updatedAt']);
+const isSchema = (x) => x && typeof x === 'object' && x.__schema;
+const isMixed = (x) => x === 'Mixed';
+function isFieldDef(node) {
+  if (!node || typeof node !== 'object' || Array.isArray(node) || isSchema(node)) return false;
+  const t = node.type;
+  return t !== undefined && (typeof t === 'function' || Array.isArray(t) || isMixed(t) || isSchema(t));
+}
+
+/** defn 아래에 parts 경로가 있는가 */
+function pathOk(defn, parts) {
+  let cur = defn;
+  for (let k = 0; k < parts.length; k++) {
+    const part = parts[k];
+    if (part === '$' || /^\d+$/.test(part) || part.startsWith('$[')) continue; // 배열 위치
+    if (isMixed(cur)) return true;
+    if (cur === 'PRIMITIVE') return false;
+    if (cur === 'ARRAY_PRIMITIVE') return false;
+    if (!cur || typeof cur !== 'object') return false;
+    if (isSchema(cur)) cur = cur.d;
+    let node = cur[part];
+    if (node === undefined) return k === 0 && ALWAYS.has(part);
+    // 노드를 다음 탐색 대상으로 정규화
+    const descend = (n) => {
+      if (isMixed(n)) return 'Mixed';
+      if (isSchema(n)) return n.d;
+      if (Array.isArray(n)) {
+        const el = n[0];
+        if (el === undefined || isMixed(el)) return 'Mixed';
+        if (isSchema(el)) return el.d;
+        if (typeof el === 'function') return 'ARRAY_PRIMITIVE';
+        if (isFieldDef(el)) return descend(el.type);
+        if (typeof el === 'object') return el;
+        return 'ARRAY_PRIMITIVE';
+      }
+      if (isFieldDef(n)) return descend(n.type);
+      if (typeof n === 'function') return 'PRIMITIVE';
+      if (n && typeof n === 'object') return n; // 중첩 객체
+      return 'PRIMITIVE';
+    };
+    cur = descend(node);
+  }
+  return true;
+}
+
+function checkPath(name, schema, path, where) {
+  if (!schema) return;
+  if (!pathOk(schema.d, path.split('.'))) throw new Error(`fake: ${name} 스키마에 없는 필드 "${path}" (${where}) — 실제 Mongoose는 이 값을 조용히 버립니다`);
+}
+
+function checkFilter(name, schema, filter, where = '조회 조건') {
+  if (!schema || !filter || typeof filter !== 'object') return;
+  for (const [k, v] of Object.entries(filter)) {
+    if (k === '$or' || k === '$and' || k === '$nor') {
+      for (const f of v) checkFilter(name, schema, f, where);
+      continue;
+    }
+    if (k.startsWith('$')) continue;
+    checkPath(name, schema, k, where);
+  }
+}
+
+function checkUpdate(name, schema, update) {
+  if (!schema) return;
+  for (const [op, fields] of Object.entries(update)) {
+    if (!op.startsWith('$')) {
+      checkPath(name, schema, op, '업데이트');
+      continue;
+    }
+    for (const path of Object.keys(fields || {})) checkPath(name, schema, path, `업데이트 ${op}`);
+  }
+}
+
+function checkDoc(name, schema, doc) {
+  if (!schema) return;
+  for (const k of Object.keys(doc || {})) checkPath(name, schema, k, '생성');
+}
+
 /** 고유 인덱스 (실제 스키마와 같게) — create 시 중복이면 code 11000 */
 const UNIQUE = {
   GameLog: [['roundId']],
@@ -137,7 +220,7 @@ const UNIQUE = {
 };
 
 let seq = 0;
-function makeModel(name, defaults = () => ({})) {
+function makeModel(name, defaults = () => ({}), schema = null) {
   const docs = [];
   // 체이닝 가능한 쿼리 (sort/skip/limit/lean)
   const q = (v, single = false) => {
@@ -166,6 +249,7 @@ function makeModel(name, defaults = () => ({})) {
     docs,
     reset: () => docs.splice(0),
     create: async (d) => {
+      checkDoc(name, schema, d);
       for (const spec of UNIQUE[name] ?? []) {
         const keys = Array.isArray(spec) ? spec : spec.keys;
         const where = Array.isArray(spec) ? null : spec.where; // 부분 고유 인덱스 (partialFilterExpression)
@@ -180,10 +264,10 @@ function makeModel(name, defaults = () => ({})) {
       docs.push(doc);
       return { ...clone(doc), toObject: () => clone(doc) };
     },
-    findOne: (filter) => q(docs.filter((d) => matches(d, filter)), true),
+    findOne: (filter) => (checkFilter(name, schema, filter), q(docs.filter((d) => matches(d, filter)), true)),
     findById: (id) => q(docs.filter((d) => d._id === id), true),
-    find: (filter) => q(docs.filter((d) => matches(d, filter))),
-    countDocuments: async (filter) => docs.filter((d) => matches(d, filter)).length,
+    find: (filter) => (checkFilter(name, schema, filter), q(docs.filter((d) => matches(d, filter)))),
+    countDocuments: async (filter) => (checkFilter(name, schema, filter), docs.filter((d) => matches(d, filter)).length),
     distinct: async (field, filter) => [...new Set(docs.filter((d) => matches(d, filter)).map((d) => getPath(d, field)))],
     aggregate: async () => [],
     deleteOne: async (filter) => {
@@ -198,11 +282,15 @@ function makeModel(name, defaults = () => ({})) {
       return { deletedCount: n };
     },
     updateMany: async (filter, update) => {
+      checkFilter(name, schema, filter);
+      checkUpdate(name, schema, update);
       const hit = docs.filter((x) => matches(x, filter));
       hit.forEach((d) => applyUpdate(d, update, filter, false));
       return { matchedCount: hit.length, modifiedCount: hit.length };
     },
     updateOne: async (filter, update, opts = {}) => {
+      checkFilter(name, schema, filter);
+      checkUpdate(name, schema, update);
       const d = docs.find((x) => matches(x, filter));
       if (!d) {
         if (opts.upsert) {
@@ -217,6 +305,8 @@ function makeModel(name, defaults = () => ({})) {
       return { matchedCount: 1, modifiedCount: 1 };
     },
     findOneAndUpdate: (filter, update, opts = {}) => {
+      checkFilter(name, schema, filter);
+      checkUpdate(name, schema, update);
       let d = docs.find((x) => matches(x, filter));
       let before = d ? clone(d) : null;
       if (!d && opts.upsert) {

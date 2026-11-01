@@ -438,3 +438,18 @@ test('정산 검증: 정산 직전에 추가 베팅으로 에스크로 금액이
   assert.equal(M.User.docs.find((d) => d.userId === u).escrow.length, 0, '에스크로 정리');
   assert.equal(money(u) + log.staked, 10_000, '칩 보존 (잃은 금액 = 기록된 베팅액)');
 });
+
+test('리더 임대: 이전 버전이 남긴 빈 임대 문서(leaseUntil 없음)도 바로 인수 — 무한 대기 회귀 방지', async () => {
+  const docs = M.SystemState.docs;
+  const k = docs.findIndex((d) => d._id === 'leader');
+  if (k >= 0) docs.splice(k, 1);
+  docs.push({ _id: 'leader', instance: null }); // 스키마에 임대 필드가 없던 버전이 만든 문서 모양
+  const lock = instanceLock.create('inst-new', { ttlMs: 60_000 });
+  assert.equal(await lock.tryAcquire(), true);
+  const doc = docs.find((d) => d._id === 'leader');
+  assert.equal(doc.instance, 'inst-new');
+  assert.ok(doc.leaseUntil > new Date(), '임대 만료 시각 저장');
+  // 실제 스키마에 임대 필드가 선언돼 있어야 Mongoose가 버리지 않는다
+  const real = require('../src/db/SystemState');
+  for (const f of ['leaseUntil', 'renewedAt', 'releasedAt', 'instance']) assert.ok(real.schema?.d?.[f] !== undefined, `SystemState 스키마에 ${f}`);
+});

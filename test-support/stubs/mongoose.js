@@ -1,5 +1,5 @@
 const { makeModel } = require('../fakeMongo');
-class Schema { constructor(d,o){this.d=d} index(){} }
+class Schema { constructor(d,o){this.d=d; this.o=o||{}; this.__schema=true} index(){} }
 Schema.Types = { Mixed: 'Mixed' };
 const D = {
   User: () => ({ money: 10000, escrow: [], stats: {}, diceLossStreak: 0, lastBailoutAt: null, lastDailyKey: null, dailyStreak: 0, outbox: [], txLog: [] }),
@@ -29,4 +29,4 @@ const D = {
   SettlementRecord: () => ({ participants: [], totals: {}, status: 'committed', issues: [] }),
 };
 const models = {};
-module.exports = { Schema, model: (n) => (models[n] ||= makeModel(n, D[n] || (() => ({})))), models, set(){}, connection: { on(){}, readyState: 1 } };
+module.exports = { Schema, model: (n, schema) => (models[n] ||= makeModel(n, D[n] || (() => ({})), schema)), models, set(){}, connection: { on(){}, readyState: 1 } };

@@ -206,8 +206,10 @@ process.on('uncaughtException', async (err) => {
   let alerted = false;
   await lock.acquire({
     onWait: (h) => {
-      console.warn(`⏳ 다른 인스턴스(${h?.instance ?? '?'})가 실행 중 — 임대 만료(${h?.leaseUntil ? new Date(h.leaseUntil).toISOString() : '?'})까지 대기`);
-      if (!alerted) alert('warn', '중복 인스턴스 감지', `실행 중인 인스턴스 ${h?.instance ?? '?'} 의 임대가 끝날 때까지 이 인스턴스는 대기합니다.`);
+      const who = h?.instance ?? '(기록 없음)';
+      const until = h?.leaseUntil ? new Date(h.leaseUntil).toISOString() : '(기록 없음)';
+      console.warn(`⏳ 다른 인스턴스(${who})가 리더 임대를 가지고 있음 — 만료(${until})까지 대기`);
+      if (!alerted) alert('warn', '중복 인스턴스 감지', `실행 중인 인스턴스 ${who} 의 임대(${until})가 끝날 때까지 이 인스턴스는 대기합니다.`);
       alerted = true;
     },
   });

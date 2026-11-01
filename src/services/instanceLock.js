@@ -32,7 +32,8 @@ function create(instance, { ttlMs = config.INSTANCE.LEASE_TTL_MS } = {}) {
     await ensureDoc();
     const now = new Date();
     const res = await SystemState.updateOne(
-      { _id: ID, $or: [{ leaseUntil: { $lt: now } }, { instance }] },
+      // leaseUntil: null 은 "필드 없음"도 포함 — 이전 버전이 만든 빈 임대 문서도 바로 인수
+      { _id: ID, $or: [{ leaseUntil: { $lt: now } }, { leaseUntil: null }, { instance }] },
       { $set: { instance, leaseUntil: new Date(now.getTime() + ttlMs), renewedAt: now } },
     );
     held = res.modifiedCount === 1 || res.matchedCount === 1;
